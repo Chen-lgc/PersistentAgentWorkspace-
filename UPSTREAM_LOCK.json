@@ -1,0 +1,26 @@
+{
+  "reviewed_on": "2026-11-11",
+  "sources": {
+    "maus": {
+      "repository": "https://github.com/milind-soni/OpenMausBot.git",
+      "commit": "7776162947298b73a9390fc2b75fdd24cb9087c4",
+      "package_version": "0.1.153",
+      "license": "Apache-2.0 (except enterprise/)",
+      "role": "initial OSS desktop and runtime code snapshot"
+    },
+    "memhub": {
+      "repository": "https://github.com/shibing624/memhub.git",
+      "commit": "f91a76767127ddbbc92917b17cb53e30f1bb3263",
+      "package_version": "0.2.3",
+      "license": "Apache-2.0",
+      "role": "separate evaluated memory service, not copied into product"
+    },
+    "norma": {
+      "repository": "https://github.com/multisoul-ai/Norma-AI-OS.git",
+      "commit": "335e5cb5535ba00118ff5b6335377936b7961ce9",
+      "package_version": "0.1.85",
+      "license": "AGPL-3.0-only",
+      "role": "read-only architecture reference; no source copied"
+    }
+  }
+}
