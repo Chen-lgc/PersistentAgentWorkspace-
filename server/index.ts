@@ -185,7 +185,6 @@ import {
 import { serveStatic } from "./static-files.ts";
 import { startUpkeep } from "./host/start-upkeep.ts";
 import { ComputerControl } from "./computer-control.ts";
-import { resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts"; import { engineUpdatesFor } from "./engine-updates-host.ts";
 import { appendUsage, flushUsageLedger, queuedTurnTrigger, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts";
 import { createTraceRecorder } from "./usage-trace/recorder.ts";
@@ -235,6 +234,10 @@ import { createGoalCards, type LiveGoalRun } from "./host/goal-cards.ts";
 import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { createMlxDriver } from "./drivers/mlx.ts";
+import { MlxService } from "./mlx/service.ts";
+import { persistInstance } from "./host/provider-instance.ts";
+import { createMlxRoutes } from "./routes/mlx.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
 import { forgetNotificationReader, liveAppRows, openCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt, threadsWithCardsSince } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
@@ -778,7 +781,8 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null; const tailnetShare = createTailnetShare({ port: PORT, handle: (req, res) => handleRequest(req, res), attach: (listener, handle) => upgrades.attach(listener, handle), log: (line) => console.log(line) });
 const cfg = loadConfig();
 const hostedModels = hostedModelPolicy(DATA_DIR);
-const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
+const mlx = new MlxService(DATA_DIR);
+const providerConfigs = () => hostedModels ? hostedModels.configs() : { ...instanceConfigs(cfg), mlxLocal: { driver: "mlx", displayName: "MLX · Local", access: "custom" as const, config: {} } };
 const decorateHostedProvider = hostedModels ? (instance: ProviderInstance) => hostedModels.decorate(instance) : undefined;
 if (hostedModels) {
   const selection = hostedModels.select(cfg.defaultModelSelection);
@@ -807,7 +811,7 @@ function customDomainStatus() {
     serverIpv4: DESKTOP_MANAGED ? null : customDomainIpv4(),
   };
 }
-const registry = new ProviderRegistry(BUILT_IN_DRIVERS, { statusFile: join(DATA_DIR, "providers", "engine-status.json") });
+const registry = new ProviderRegistry([...BUILT_IN_DRIVERS, createMlxDriver(mlx)], { statusFile: join(DATA_DIR, "providers", "engine-status.json") });
 const supportsApprovalMode = createApprovalModeSupport(registry);
 registerEnginesBinDir(); const engineUpdates = engineUpdatesFor({ drivers: BUILT_IN_DRIVERS, turnRunning: () => store.bots.some((bot) => botHasActiveTurn(bot.id)) || store.groups.some(groupIsWorking) || Boolean(routines?.hasActiveRuns()), configuredClis: () => Object.values(providerConfigs()).flatMap((entry) => { const cli = (entry.config as { cli?: unknown } | undefined)?.cli; return typeof cli === "string" && cli ? [cli] : []; }), updated: () => { registry.forgetSnapshots(); broadcast({ kind: "config", ...configStatus() }); } });
 
@@ -11942,20 +11946,11 @@ async function stopCompanyInstances(ids: string[]) {
   for (const id of ids) { providerAuthSessions.clearInstance(id); bus.detach(id); }
 }
 
-async function persistProviderInstance(instanceId: string, instances: NonNullable<AppConfig["instances"]>) {
-  saveConfig({ instances }, { replaceInstances: true });
-  cfg.instances = instances;
-  providerAuthSessions.clearInstance(instanceId);
-  bus.detach(instanceId);
-  if (Object.hasOwn(instances, instanceId)) {
-    await registry.load({ [instanceId]: instanceConfigs(cfg)[instanceId] });
-    const live = registry.get(instanceId);
-    if (live) bus.attach([live]);
-  } else {
-    await registry.dispose(instanceId);
-  }
-  resetPathCache();
-}
+const persistProviderInstance = (instanceId: string, instances: NonNullable<AppConfig["instances"]>) =>
+  persistInstance({ cfg, registry,
+    clearAuthentication: (id) => providerAuthSessions.clearInstance(id),
+    detach: (id) => bus.detach(id), attach: (instance) => bus.attach([instance]),
+  }, instanceId, instances);
 
 /** The engine a bot's process in a conversation runs on: the running turn's when it is the bot's, else the bot's selection there. */
 function threadEngineId(botId: string, threadId: string): string | undefined {
@@ -12387,6 +12382,7 @@ const postiz = createPostiz({ cfg: () => cfg, mcpOAuth, persistMcpServers: persi
   ...(CLOUD_TEAM ? { ownProfile: (auth: RequestAuth, profile: { name?: string; avatarUrl?: string; aboutMe?: string }) => auth.kind === "session" ? (teamHost.saveMemberProfile(auth.session, profile), true) : false, ownHints: (auth: RequestAuth, hints: string[]) => auth.kind === "session" ? (teamWelcome.save(personKey(auth.session), { hints }), true) : false } : {}),
   resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, postiz,
 }));
+ROUTES.push(createMlxRoutes({ mlx, hosted: Boolean(hostedModels), changed: () => { registry.forgetSnapshots(); broadcast({ kind: "config", ...configStatus() }); } }));
 ROUTES.push(createInstanceRoutes({
   store, cfg, registry, sessions, providerAuthSessions,
   hostedModels: Boolean(hostedModels),
@@ -15471,7 +15467,7 @@ const gracefulShutdown = createGracefulShutdown({
       webhookIngress?.server.close(); webhookIngress?.socketServer?.close();
       tunnelListener?.close(); void tailnetShare.close(); phoneRelay?.stop(); stopCloudHomeConnectedApps();
     },
-    async () => { await managedDesktop.close(); await registry.disposeAll(); },
+    async () => { await managedDesktop.close(); await registry.disposeAll(); await mlx.close(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
     async () => {
       const temporaries = [...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId));

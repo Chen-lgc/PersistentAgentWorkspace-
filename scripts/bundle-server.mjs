@@ -154,6 +154,12 @@ const catalogSnapshot = join(root, "dist-server", "model-catalog", "models-dev.s
 mkdirSync(dirname(catalogSnapshot), { recursive: true });
 copyFileSync(join(server, "model-catalog", "models-dev.snapshot.json"), catalogSnapshot);
 
+const mlxPython = join(root, "dist-server", "mlx", "python");
+mkdirSync(mlxPython, { recursive: true });
+for (const file of ["worker.py", "kda.py", "requirements.txt", "NOTICE.md"]) {
+  copyFileSync(join(server, "mlx", "python", file), join(mlxPython, file));
+}
+
 // Pi loads this through its own jiti and supplies TypeBox. Inline our local
 // policy module so the extension also works without the source checkout;
 // keep the Pi-owned dependency external and retain the .ts loading contract.

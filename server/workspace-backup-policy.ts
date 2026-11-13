@@ -35,6 +35,7 @@ export function restoredWorkspaceConfig(portable: unknown, destination: unknown)
 }
 
 export function excludedWorkspaceAuthPath(path: string): boolean {
+  if (/^mlx(?:\/|$)/.test(path)) return true;
   if (inSecretFolder(path)) return true;
   if (/^command-allowlist\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;
   if (/^mcp-oauth\.json(?:$|\.\d+\.[0-9a-f-]+\.tmp$)/.test(path)) return true;

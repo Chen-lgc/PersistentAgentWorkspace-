@@ -8,6 +8,8 @@
 
 项目优先支持**中文交互**，同时保持多语言与多模型扩展能力；以本地桌面应用为首个落地载体，逐步形成面向个人工作流与 AI Employees 的统一 Agentic Runtime。
 
+支持从私有 **CSGHub CE** 仓库浏览、下载模型，在 Apple Silicon 上使用 **MLX-LM** 或 **SSM / OmniFM** 文本模型进行本地推理。入口：设置 → 引擎 → 本地 MLX。见[配置与使用说明](docs/mlx-local.md)。
+
 ---
 
 ## Vision
