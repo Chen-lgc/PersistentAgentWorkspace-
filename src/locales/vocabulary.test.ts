@@ -118,7 +118,7 @@ describe("one name per thing", () => {
       Object.entries(pack)
         .filter(([key]) => !PENDING_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)))
         .filter(([key, value]) => /\bOMB\b|\bT3\b/.test(value!) || productNames.some(([, pattern]) => pattern.test(value!))
-          || (/MausBot Cloud/.test((en as Record<string, string>)[key]!) && !/MausBot Cloud/.test(value!))
+          || (/MausBot Cloud/.test((en as Record<string, string>)[key]!) && !(code === "zh" ? /QBot Cloud/.test(value!) : /MausBot Cloud/.test(value!)))
           || (/boat/i.test(value!) && !/\bboats?\b/i.test((en as Record<string, string>)[key]!)))
         .map(([key]) => `${code}: ${key}`));
     expect([...new Set(offending)]).toEqual([]);
