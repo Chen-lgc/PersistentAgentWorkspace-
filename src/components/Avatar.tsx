@@ -227,6 +227,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
     avatarFocusY?: number;
     mascotBody?: BotBodyId | null;
     mascotFaceColor?: MascotFaceColor | null;
+    defaultBot?: unknown;
   };
 };
 
@@ -257,6 +258,11 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
     hasUrl: Boolean(profile.avatarUrl),
     imageFailed,
   });
+
+  if (bot.defaultBot && !profile.avatarUrl) {
+    return <img src="/app-icon.svg" alt={label ?? bot.name ?? "QBot"} width={size} height={size}
+      className="block shrink-0 rounded-2xl object-contain" draggable={false} />;
+  }
 
   if (outcome !== "flatImage") {
     return (

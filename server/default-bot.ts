@@ -118,8 +118,12 @@ export function ensureDefaultBot(store: DefaultBotStore, options: { dataDir: str
     .sort((a, b) => a.createdAt - b.createdAt);
   for (const extra of marked.slice(1)) store.patchBot(extra.id, { defaultBot: undefined, sidebarHidden: undefined });
   if (marked[0]) {
-    remember(options.dataDir, person, marked[0].id);
-    return marked[0];
+    // Brand-only migration of the legacy default; do not rewrite a user-customized name.
+    const starter = marked[0].name === "MausBot"
+      ? (store.patchBot(marked[0].id, { name: DEFAULT_BOT_NAME }) ?? marked[0])
+      : marked[0];
+    remember(options.dataDir, person, starter.id);
+    return starter;
   }
   if (Object.hasOwn(ledger(options.dataDir), person)) return null;
   const adoptable = person ? undefined : seededMausBot(store.bots);

@@ -19,6 +19,7 @@ let pending: Array<(ph: PostHog) => void> = [];
 let choice: boolean | undefined;
 
 export function analyticsEnabled(): boolean {
+  if (import.meta.env.DEV) return false; // Disable upstream telemetry in local development.
   if (choice !== undefined) return choice;
   const desktop = desktopSwitch()?.enabled();
   if (typeof desktop === "boolean") return desktop;

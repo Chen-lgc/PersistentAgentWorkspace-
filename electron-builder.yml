@@ -1,6 +1,6 @@
-appId: com.openmausbot.app
-productName: OpenMausBot
-artifactName: OpenMausBot-${version}-${arch}.${ext}
+appId: lab.qlab.qbot
+productName: QBot
+artifactName: QBot-${version}-${arch}.${ext}
 
 protocols:
   - name: OpenMausBot package install

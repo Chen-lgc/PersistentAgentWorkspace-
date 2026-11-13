@@ -93,11 +93,17 @@ export function activePackComplete(): boolean {
   return activePack !== en && Object.keys(en).every((key) => Object.hasOwn(activePack, key));
 }
 
+/** Product-name redirection at presentation only; do not mutate locale keys or network URLs. */
+export function qbotDisplayName(value: string): string {
+  return value.replace(/\b(?:OpenMausBot|MausBot)\b/g, "QBot");
+}
+
 /** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
-  if (!params && !template.includes("{app}")) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name: string) =>
+  if (!params && !template.includes("{app}")) return qbotDisplayName(template);
+  const filled = template.replace(/\{(\w+)\}/g, (match, name: string) =>
     params && name in params ? String(params[name]) : name === "app" ? productName() : match,
   );
+  return qbotDisplayName(filled);
 }
