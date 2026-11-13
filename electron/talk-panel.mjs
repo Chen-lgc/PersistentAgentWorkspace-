@@ -7,12 +7,14 @@ const MASCOT_PX = 28;
 const TEXT_LINES = 10;
 const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d";
 
+const qbotLabel = value => value.replace(/\b(?:OpenMausBot|MausBot)\b/g, "QBot");
+
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
-  sending: "Sending to MausBot…",
-  thinking: "MausBot is thinking…",
-  reply: "MausBot",
-  "needs-you": "MausBot needs you · Open chat",
+  sending: "Sending to QBot…",
+  thinking: "QBot is thinking…",
+  reply: "QBot",
+  "needs-you": "QBot needs you · Open chat",
   "still-working": "Still working · Open chat",
   error: "",
 });
@@ -53,7 +55,7 @@ export function replyPreview(text, limit = 400) {
 
 export function talkPanelHtml(iconBase64) {
   const labels = JSON.stringify(TALK_LABELS);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>QBot</title><style>
 :root{color-scheme:dark light}
 body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
 body.light{${LIGHT}}
@@ -163,7 +165,7 @@ export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, 
   async function paint() {
     const target = win;
     const ticket = ++latest;
-    const labels = { ...TALK_LABELS, listening: t("native.talk.listening"), sending: t("native.talk.sending"), thinking: t("native.talk.thinking"), "needs-you": t("native.talk.needsYou"), "still-working": t("native.talk.stillWorking") };
+    const labels = { ...TALK_LABELS, listening: t("native.talk.listening"), sending: qbotLabel(t("native.talk.sending")), thinking: qbotLabel(t("native.talk.thinking")), "needs-you": qbotLabel(t("native.talk.needsYou")), "still-working": t("native.talk.stillWorking") };
     const payload = JSON.stringify({ state: view.state, text: view.textCode ? t(view.textCode) : replyPreview(view.text), labels, dismiss: t("native.talk.dismiss"), release: t("native.talk.releaseToSend"), ...(theme ? { theme } : {}) });
     let height;
     try {
