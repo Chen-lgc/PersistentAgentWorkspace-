@@ -3,7 +3,7 @@ productName: QBot
 artifactName: QBot-${version}-${arch}.${ext}
 
 protocols:
-  - name: OpenMausBot package install
+  - name: QBot desktop protocol
     schemes: [openmausbot]
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
@@ -15,8 +15,8 @@ protocols:
 # stranded on its installed version.
 publish:
   - provider: github
-    owner: milind-soni
-    repo: OpenMausBot
+    owner: Qingyan-QLab
+    repo: PersistentAgentWorkspace
 
 directories:
   buildResources: build
