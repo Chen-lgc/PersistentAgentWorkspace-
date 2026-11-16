@@ -1,10 +1,10 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { dirname, extname, resolve } from "node:path";
+import { basename, dirname, extname, resolve } from "node:path";
 
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
-import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
+import type { TurnImageInput, TurnPdfInput, TurnVideoInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
@@ -13,6 +13,7 @@ export const TURN_IMAGE_MAX_COUNT = 10;
 export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
 // A video is sampled into several frames before it reaches a model, so only the first one in a message is sampled.
 export const TURN_VIDEO_MAX_COUNT = 1;
+export const TURN_PDF_MAX_BYTES = 20 * 1024 * 1024;
 
 type MarkdownNode = {
   type: string;
@@ -24,12 +25,14 @@ type MarkdownNode = {
   };
 };
 
-type TagCandidate = { start: number; end: number; kind: "image" | "file"; path: string };
+type TagCandidate = { start: number; end: number; kind: "image" | "file"; path: string; name?: string };
 
 const OWNED_IMAGE_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(png|jpg|gif|webp)$/;
 const OWNED_VIDEO_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(mp4|webm|mov)$/;
+const OWNED_PDF_NAME =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pdf$/;
 // Composer video attachments use the generic <attached-file> tag (the same one documents and audio use); only its
 // path decides whether it resolves to a video, so every other file kind keeps going through unexamined.
 const ATTACHMENT_TAG =
@@ -75,9 +78,33 @@ function attachmentTagCandidates(text: string): TagCandidate[] {
     if (text.slice(lineStart, start).trim() || text.slice(end, lineEnd).trim()) return;
     const match = ATTACHMENT_TAG.exec(node.value);
     if (!match) return;
-    candidates.push({ start, end, kind: match[1] === "file" ? "file" : "image", path: decodeAttachmentAttribute(match[2]!) });
+    candidates.push({ start, end, kind: match[1] === "file" ? "file" : "image", path: decodeAttachmentAttribute(match[2]!),
+      ...(match[3] ? { name: decodeAttachmentAttribute(match[3]) } : {}) });
   });
   return candidates;
+}
+
+export function extractTurnPdfs(text: string, attachmentsDir = ATTACHMENTS_DIR): TurnPdfInput[] {
+  if (!text.includes("<attached-file")) return [];
+  const pdfs = attachmentTagCandidates(text)
+    .filter((tag) => tag.kind === "file" && extname(tag.path).toLowerCase() === ".pdf")
+    .map((tag) => ({ tag, pdf: ownedAttachment(tag.path, attachmentsDir, OWNED_PDF_NAME, { ".pdf": "application/pdf" }, FILE_MAX_BYTES) }))
+    .filter((item): item is { tag: TagCandidate; pdf: { path: string; mime: "application/pdf"; bytes: number } } => item.pdf !== null)
+    .map(({ tag, pdf: { path, bytes } }) => ({ path, bytes, name: tag.name ?? basename(path) }));
+  if (pdfs.reduce((total, pdf) => total + pdf.bytes, 0) > TURN_PDF_MAX_BYTES) {
+    throw statusError(413, "PDF attachments for one model turn are limited to 20 MB total.");
+  }
+  return pdfs;
+}
+
+export function withoutTurnPdfTags(text: string, pdfs: readonly TurnPdfInput[]): string {
+  if (!pdfs.length || !text.includes("<attached-file")) return text;
+  const paths = new Set(pdfs.map((pdf) => resolve(pdf.path)));
+  let result = text;
+  for (const tag of attachmentTagCandidates(text).filter((tag) => tag.kind === "file" && paths.has(resolve(tag.path))).sort((a, b) => b.start - a.start)) {
+    result = result.slice(0, tag.start) + result.slice(tag.end);
+  }
+  return result;
 }
 
 function ownedAttachment<Mime extends string>(

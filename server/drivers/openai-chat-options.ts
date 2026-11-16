@@ -39,6 +39,8 @@ export interface RuntimeOptions<Config> {
   retryScale?: number;
   tools?: boolean;
   computerUse?: boolean;
+  pdfInput?: boolean;
+  pdfAttachmentDir?: string;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
   /** Some models list `variants`; the picked one reaches `requestBody`. */ modelVariants?: boolean;

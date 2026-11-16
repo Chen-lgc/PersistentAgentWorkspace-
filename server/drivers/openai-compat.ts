@@ -370,6 +370,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       apiUrl: config.url,
       tools: config.tools,
       computerUse: true,
+      pdfInput: true,
       nudgeAnnouncedAction: true,
       models: () => catalog,
       refreshModels: fetchModels,

@@ -16,6 +16,8 @@ import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, 
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, imageTransportAllowed, type ChatContentPart } from "./chat-images.ts";
+import { chatPdfParts } from "./chat-pdfs.ts";
+import { withoutTurnPdfTags } from "../turn-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
@@ -239,7 +241,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const send = options.transport ?? (options.timeoutMs > FETCH_LIMIT_MS ? fetchPastLimit : fetch);
       const response = await send(`${options.apiUrl}/${route === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST",
-        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
+        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url" || part.type === "file")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: payload,
         signal: activeSignal,
@@ -431,7 +433,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
   const seesImages = (turn: SendTurnInput) =>
     options.imageInput?.(turn.model || options.models().default) ?? true;
-  const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => {
+  const messagesFor = (turn: SendTurnInput, pdfParts: ReturnType<typeof chatPdfParts>): OpenAIChatMessage[] => {
     const halves = promptHalves(turn);
     const transcript = turn.transcript ?? [];
     const replay = replayDelivered(transcript, delivered.get(turn.threadId) ?? []);
@@ -440,12 +442,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : volatileContextNote(volatile, Boolean(replay.volatile));
     const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !turn.images?.length ? text
       : `${text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}`;
-    const userTurn = note ? { ...turn, text: withContextNote(note, turn.text) } : turn;
-    const content = options.computerUse && seesImages(turn) ? chatUserContent(userTurn) : textOnly(userTurn.text);
+    const sentText = withoutTurnPdfTags(turn.text, turn.pdfs ?? []);
+    const userTurn = { ...turn, text: withContextNote(note, sentText) };
+    const content = options.computerUse && seesImages(turn) ? chatUserContent(userTurn, pdfParts) : textOnly(userTurn.text);
     const kept = turn.recalled ? turn.text.replace(`${turn.recalled}\n\n`, "") : turn.text;
     const record = {
       text: kept,
-      sent: textOnly(withContextNote(note, kept)),
+      sent: textOnly(withContextNote(note, withoutTurnPdfTags(kept, turn.pdfs ?? []))),
       ...(note ? { volatile } : {}),
       after: transcript.length ? fingerprint(transcript.at(-1)!.text) : "",
     };
@@ -467,10 +470,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
     if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
+    if (options.pdfInput && turn.pdfs?.length && !seesImages(turn)) throw new Error("This model cannot read PDF files.");
+    const pdfParts = options.pdfInput ? chatPdfParts(turn.pdfs ?? [], options.pdfAttachmentDir) : [];
 
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn);
+    const messages = messagesFor(turn, pdfParts);
     const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);

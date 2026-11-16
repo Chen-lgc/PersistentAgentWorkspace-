@@ -79,7 +79,9 @@ export function routeRefusal(route: ModelRoute, status: number, body: string): R
 function inputContent(content: ChatContentPart[]) {
   return content.map((part) => part.type === "image_url"
     ? { type: "input_image", image_url: part.image_url.url, detail: "auto" }
-    : { type: "input_text", text: part.text });
+    : part.type === "file"
+      ? { type: "input_file", filename: part.file.filename, file_data: part.file.file_data }
+      : { type: "input_text", text: part.text });
 }
 
 function inputItems(message: OpenAIChatMessage, replay: ResponseItem[] | undefined): ResponseItem[] {

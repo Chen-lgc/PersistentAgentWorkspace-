@@ -3,7 +3,8 @@ import type { SendTurnInput } from "../contracts.ts";
 
 export interface ChatImagePart { type: "image_url"; image_url: { url: string } }
 export interface ChatTextPart { type: "text"; text: string }
-export type ChatContentPart = ChatTextPart | ChatImagePart;
+export interface ChatFilePart { type: "file"; file: { filename: string; file_data: string } }
+export type ChatContentPart = ChatTextPart | ChatImagePart | ChatFilePart;
 const IMAGE_BYTES = 20 * 1024 * 1024;
 const MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 export const CHAT_IMAGE_BUDGET = 32 * 1024 * 1024;
@@ -47,15 +48,15 @@ export function chatImage(item: { mimeType?: unknown; data?: unknown }): ChatIma
   return { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } };
 }
 
-export function chatUserContent(turn: SendTurnInput): string | ChatContentPart[] {
-  if (!turn.images?.length) return turn.text;
+export function chatUserContent(turn: SendTurnInput, pdfs: ChatFilePart[] = []): string | ChatContentPart[] {
+  if (!turn.images?.length && !pdfs.length) return turn.text;
   const budget = chatImageBudget();
-  return [{ type: "text", text: turn.text }, ...turn.images.map(image => {
+  return [...(turn.text ? [{ type: "text" as const, text: turn.text }] : []), ...(turn.images ?? []).map(image => {
     if (statSync(image.path).size > IMAGE_BYTES) throw new Error("Image exceeds 20 MB");
     const part = chatImage({ mimeType: image.mime, data: readFileSync(image.path).toString("base64") });
     budget([part]);
     return part;
-  })];
+  }), ...pdfs];
 }
 
 export function chatToolImages(callId: string, images?: ChatImagePart[]): ChatContentPart[] {

@@ -92,6 +92,13 @@ export interface TurnImageInput {
   source?: "video-frame";
 }
 
+/** A PDF already admitted to the private attachment store for this turn's API model input. */
+export interface TurnPdfInput {
+  path: string;
+  bytes: number;
+  name: string;
+}
+
 /** A video already admitted to the private attachment store; resolved into TurnImageInput frames before any driver sees it. */
 export interface TurnVideoInput {
   path: string;
@@ -141,6 +148,7 @@ export interface SendTurnInput {
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */
   images?: TurnImageInput[];
+  pdfs?: TurnPdfInput[];
   model?: string;
   effort?: EffortLevel;
   variant?: string;
