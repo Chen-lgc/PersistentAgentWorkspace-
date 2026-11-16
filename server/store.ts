@@ -20,6 +20,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { rotationColor } from "./bot-look.ts";
 import { redactBotAuthored } from "./message-redaction.ts";
+import { conversationPdfs, messagePdfReferences } from "./conversation-pdfs.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
@@ -1130,6 +1131,12 @@ export class Store {
     return this.thread(threadId).activeLeafId;
   }
 
+  conversationPdfs(threadId: string, throughMessageId?: string) {
+    return conversationPdfs(this.activePath(threadId), throughMessageId, undefined, (message, pdfReferences) => {
+      this.patchMessage(threadId, message.id, { pdfReferences });
+    });
+  }
+
   activePath(threadId: string): Message[] {
     const t = this.thread(threadId);
     const byId = new Map(t.messages.map((m) => [m.id, m]));
@@ -1157,6 +1164,7 @@ export class Store {
   appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command): Message {
     const t = this.thread(threadId);
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    if (full.role === "user" && full.kind === "text") full.pdfReferences = messagePdfReferences(full);
     const persist = () => { mdb.appendMessage(threadId, full); return full; };
     const committed = command ? runCommand(command, persist) : persist();
     if (committed.id !== full.id) return committed;
@@ -1179,6 +1187,7 @@ export class Store {
     const anchorExists = anchorId !== undefined && t.messages.some((m) => m.id === anchorId);
     if (!anchorExists || t.activeLeafId === anchorId) return this.appendMessage(threadId, message);
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
+    if (full.role === "user" && full.kind === "text") full.pdfReferences = messagePdfReferences(full);
     const children = t.messages.filter((m) => m.parentId === anchorId);
     t.messages.push(full);
     mdb.insertMessage(threadId, full);
@@ -1236,6 +1245,7 @@ export class Store {
       ...(sender ? { sender } : {}),
       ...(dataContext ? { dataContext } : {}),
     };
+    full.pdfReferences = messagePdfReferences(full);
     t.messages.push(full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
@@ -1266,6 +1276,7 @@ export class Store {
     const idx = t.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return null;
     const next = { ...t.messages[idx], ...patch, card: patch.card ?? t.messages[idx].card };
+    if (patch.text !== undefined && next.role === "user" && next.kind === "text") next.pdfReferences = messagePdfReferences(next);
     // Persist before memory: a failed write must not mark a card answered that a restart shows pending.
     let applied = false;
     const persist = () => { mdb.updateMessage(threadId, next); applied = true; return next; };

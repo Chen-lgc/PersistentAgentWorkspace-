@@ -41,6 +41,9 @@ export interface RuntimeOptions<Config> {
   computerUse?: boolean;
   pdfInput?: boolean;
   pdfAttachmentDir?: string;
+  /** Native PDF support for this endpoint and model. Unknown is probed by sending the actual attachment. */
+  pdfSupport?: (model: string) => boolean | undefined;
+  recordPdfSupport?: (model: string, supported: boolean) => void;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean;
   /** Some models list `variants`; the picked one reaches `requestBody`. */ modelVariants?: boolean;

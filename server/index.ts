@@ -332,7 +332,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
-import { extractReplayImages, extractRoomTurnPdfs, extractTurnImages, extractTurnPdfs, videoFramesWithin } from "./turn-images.ts";
+import { extractReplayImages, extractTurnImages, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
 import { engineProcessGone, stallLimitMs, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts";
@@ -7620,7 +7620,6 @@ async function beginTurn(
     throw Object.assign(new Error(botApiThread(threadId) ? serverLine(threadLanguage(threadId), "server.botApi.engineRefusal") : guestEngineRefusal(threadId)), { status: 409, code: "guest_engine" });
   }
   const resolvedImages = extractTurnImages(text);
-  const turnPdfs = instance.driverKind === "openai-compat" ? extractTurnPdfs(text) : [];
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
@@ -8439,7 +8438,7 @@ async function beginTurn(
         text: withTurnClock(clock, withRecalled(recalled, attachmentsForBox(dispatchContext.turnText, cwd) + shareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
         ...(recalled ? { recalled } : {}),
         images: dispatchContext.images,
-        ...(turnPdfs.length ? { pdfs: turnPdfs } : {}),
+        ...(instance.driverKind === "openai-compat" ? { pdfs: store.conversationPdfs(threadId, pendingSource) } : {}),
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         approvalModeNow: () => liveApprovalMode(bot, threadId, commsDepth > 0),
         toolScope,
@@ -9805,7 +9804,7 @@ async function runClaimedGroupMemberTurn(
   );
   const roomContext = roomWindow.text;
   const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos)] : [];
-  const turnPdfs = extractRoomTurnPdfs(instance.driverKind, burstOverrides.map(({ text }) => text), !cardContinuation && !latestInBurst ? latestUser?.text : undefined);
+  const turnPdfs = instance.driverKind === "openai-compat" ? store.conversationPdfs(threadId, latestUser?.id) : [];
   const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(

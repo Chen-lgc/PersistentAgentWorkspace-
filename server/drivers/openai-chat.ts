@@ -17,6 +17,7 @@ import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, imageTransportAllowed, type ChatContentPart } from "./chat-images.ts";
 import { chatPdfParts } from "./chat-pdfs.ts";
+import { PDF_HISTORY_ONLY_NOTE, pdfNeedsResponses, rejectsPdfInput, UnsupportedPdfInputError } from "./pdf-capabilities.ts";
 import { withoutTurnPdfTags } from "../turn-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
@@ -165,6 +166,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   }>();
   const reasoningReplayRejected = new Set<string>();
   const routes = createModelRoutes();
+  const pdfResponses = new Set<string>();
   /** Beside the messages, not on them, so encrypted reasoning never reaches a Chat Completions body, a log or a handoff. */
   const responseOutputs = new WeakMap<OpenAIChatMessage, ResponseItem[]>();
   const assistantReply = (model: string, completion: Completion, content: string | null, toolCalls?: ChatToolCall[]): OpenAIChatMessage => {
@@ -249,10 +251,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const failure = (status: number, body: string): Error => {
         const plain = options.plainRefusal?.(status, body); if (plain) return new Error(plain);
         const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
+        const pdfMessageIndexes = messages.flatMap((entry, index) => Array.isArray(entry.content) && entry.content.some((part) => part.type === "file") ? [index] : []);
+        const hasPdfs = pdfMessageIndexes.length > 0;
+        if (hasPdfs && route === "responses" && pdfResponses.has(model) && routeRefusal(route, status, body) === "responses-unavailable" && (status === 404 || status === 405)) return new UnsupportedPdfInputError(message);
         const refused = tools.length ? routeRefusal(route, status, body) : null;
         if (refused) return new ModelRouteRefused(refused, message);
         if (rejectsKey(status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
         if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload));
+        if (hasPdfs && rejectsPdfInput(status, body, route === "responses" ? [] : pdfMessageIndexes)) return new UnsupportedPdfInputError(message, route !== "responses" && pdfNeedsResponses(body));
         if (rejectsToolsParameter(status, body)) return new UnsupportedChatToolsError(message);
         const refusal = refusedToolCall(status, body);
         if (refusal) return new RejectedToolCallError(message, refusal);
@@ -418,12 +424,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   ): Promise<Completion> => {
     for (;;) {
       let replied = false;
+      const hasPdfs = messages.some((entry) => Array.isArray(entry.content) && entry.content.some((part) => part.type === "file"));
+      const route = hasPdfs && pdfResponses.has(model) ? "responses" : routes.routeFor(model, tools.length > 0);
       try {
-        return await completeOn(routes.routeFor(model, tools.length > 0), messages, model, stream, signal, onDelta && ((text, kind) => {
+        return await completeOn(route, messages, model, stream, signal, onDelta && ((text, kind) => {
           replied = true;
           onDelta(text, kind);
         }), tools, onUsage, variant);
       } catch (error) {
+        if (error instanceof UnsupportedPdfInputError && error.tryResponses && !replied && !signal?.aborted) {
+          pdfResponses.add(model);
+          continue;
+        }
         if (!(error instanceof ModelRouteRefused) || replied || signal?.aborted) throw error;
         if (!routes.advance(model, error.refusal)) throw new ChatProtocolError(noRouteLeft(error.message));
         console.warn(`${options.driverKind}: ${model} answered ${error.refusal}; now on ${routes.routeFor(model, true)}`);
@@ -443,8 +455,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !turn.images?.length ? text
       : `${text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}`;
     const sentText = withoutTurnPdfTags(turn.text, turn.pdfs ?? []);
-    const userTurn = { ...turn, text: withContextNote(note, sentText) };
-    const content = options.computerUse && seesImages(turn) ? chatUserContent(userTurn, pdfParts) : textOnly(userTurn.text);
+    const userTurn = { ...turn, text: textOnly(withContextNote(note, sentText)), images: options.computerUse && seesImages(turn) ? turn.images : undefined };
+    const content = chatUserContent(userTurn, pdfParts);
     const kept = turn.recalled ? turn.text.replace(`${turn.recalled}\n\n`, "") : turn.text;
     const record = {
       text: kept,
@@ -460,7 +472,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       ...(system ? [{ role: "system" as const, content: system }] : []),
       ...transcript.map((message, index) => ({
         role: message.role,
-        content: replay.content.get(index) ?? message.text,
+        content: withoutTurnPdfTags(replay.content.get(index) ?? message.text, turn.pdfs ?? []),
       })),
       { role: "user", content },
     ];
@@ -470,8 +482,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
     if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
-    if (options.pdfInput && turn.pdfs?.length && !seesImages(turn)) throw new Error("This model cannot read PDF files.");
-    const pdfParts = options.pdfInput ? chatPdfParts(turn.pdfs ?? [], options.pdfAttachmentDir) : [];
+    const model = turn.model || options.models().default;
+    let pdfAttached = Boolean(options.pdfInput && turn.pdfs?.length && options.pdfSupport?.(model) !== false);
+    const pdfParts = pdfAttached ? chatPdfParts(turn.pdfs ?? [], options.pdfAttachmentDir) : [];
 
     const turnId = newId();
     const abort = new AbortController();
@@ -479,7 +492,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
-    const model = turn.model || options.models().default;
+    const usePdfHistoryOnly = () => {
+      for (const message of messages) if (Array.isArray(message.content)) {
+        const parts = message.content.filter((part) => part.type !== "file");
+        message.content = parts.every((part) => part.type === "text") ? parts.map((part) => part.text).join("\n") : parts;
+      }
+      const system = messages.find((message) => message.role === "system" && typeof message.content === "string");
+      if (system) system.content += `\n\n${PDF_HISTORY_ONLY_NOTE}`;
+      else messages.unshift({ role: "system", content: PDF_HISTORY_ONLY_NOTE });
+      emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `模型 ${model} 的当前接口不支持传入 PDF，本轮仅根据历史文字和当前问题回答。PDF 已保留在本会话中。` });
+    };
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -537,6 +559,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
+    if (turn.pdfs?.length && !pdfAttached) usePdfHistoryOnly();
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -614,6 +637,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const shown = holdback && streamKind === "assistant_text" ? holdback.feed(text) : text;
                 if (shown) delta(shown, streamKind);
               }, tools.definitions, undefined, turn.variant);
+              if (pdfAttached && round === 0) {
+                options.recordPdfSupport?.(model, true);
+                emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `本轮已向 ${model} 附带 ${turn.pdfs!.length} 份会话 PDF 原件及历史对话。` });
+              }
               // A reply cut off at the token limit may be a call cut short; running half of one is worse than saying so.
               const written = holdback && !completion.toolCalls.length && completion.finishReason !== "length" ? textToolCalls(completion.text, tools.definitions) : null;
               unreadable = written?.kind === "unreadable" && !askedAgain;
@@ -632,6 +659,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               break;
             } catch (value) {
               const error = asError(value);
+              if (error instanceof UnsupportedPdfInputError && pdfAttached && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted) {
+                options.recordPdfSupport?.(model, false);
+                pdfAttached = false;
+                usePdfHistoryOnly();
+                continue;
+              }
               const verdict = classifyError(error);
               // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
               const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);

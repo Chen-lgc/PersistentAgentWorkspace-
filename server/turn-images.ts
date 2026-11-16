@@ -31,7 +31,7 @@ const OWNED_IMAGE_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(png|jpg|gif|webp)$/;
 const OWNED_VIDEO_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.(mp4|webm|mov)$/;
-const OWNED_PDF_NAME =
+export const OWNED_PDF_NAME =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pdf$/;
 // Composer video attachments use the generic <attached-file> tag (the same one documents and audio use); only its
 // path decides whether it resolves to a video, so every other file kind keeps going through unexamined.
@@ -84,15 +84,15 @@ function attachmentTagCandidates(text: string): TagCandidate[] {
   return candidates;
 }
 
-export function extractTurnPdfs(text: string, attachmentsDir = ATTACHMENTS_DIR): TurnPdfInput[] {
+export function extractTurnPdfs(text: string, attachmentsDir = ATTACHMENTS_DIR, enforceTurnLimit = true): TurnPdfInput[] {
   if (!text.includes("<attached-file")) return [];
   const pdfs = attachmentTagCandidates(text)
     .filter((tag) => tag.kind === "file" && extname(tag.path).toLowerCase() === ".pdf")
     .map((tag) => ({ tag, pdf: ownedAttachment(tag.path, attachmentsDir, OWNED_PDF_NAME, { ".pdf": "application/pdf" }, FILE_MAX_BYTES) }))
     .filter((item): item is { tag: TagCandidate; pdf: { path: string; mime: "application/pdf"; bytes: number } } => item.pdf !== null)
     .map(({ tag, pdf: { path, bytes } }) => ({ path, bytes, name: tag.name ?? basename(path) }));
-  if (pdfs.reduce((total, pdf) => total + pdf.bytes, 0) > TURN_PDF_MAX_BYTES) {
-    throw statusError(413, "PDF attachments for one model turn are limited to 20 MB total.");
+  if (enforceTurnLimit && pdfs.reduce((total, pdf) => total + pdf.bytes, 0) > TURN_PDF_MAX_BYTES) {
+    throw statusError(413, `PDF attachments for one model turn are limited to ${TURN_PDF_MAX_BYTES / 1024 / 1024} MB total.`);
   }
   return pdfs;
 }
@@ -104,12 +104,17 @@ export function extractRoomTurnPdfs(driverKind: string, burstTexts: readonly str
 
 export function withoutTurnPdfTags(text: string, pdfs: readonly TurnPdfInput[]): string {
   if (!pdfs.length || !text.includes("<attached-file")) return text;
-  const paths = new Set(pdfs.map((pdf) => resolve(pdf.path)));
-  let result = text;
-  for (const tag of attachmentTagCandidates(text).filter((tag) => tag.kind === "file" && paths.has(resolve(tag.path))).sort((a, b) => b.start - a.start)) {
-    result = result.slice(0, tag.start) + result.slice(tag.end);
-  }
-  return result;
+  const names = new Set(pdfs.map((pdf) => basename(pdf.path)));
+  // Admission still requires an owned, standalone tag. Removal also covers JSON-labelled room text and box paths;
+  // it cannot grant file access, and only removes references already admitted for this conversation.
+  return text.replace(/<attached-file\b[^>\r\n]*\/>/g, (tag) => {
+    let decoded = tag;
+    if (tag.includes('\\"')) {
+      try { decoded = JSON.parse(`"${tag}"`) as string; } catch { return tag; }
+    }
+    const match = ATTACHMENT_TAG.exec(decoded);
+    return match && names.has(basename(decodeAttachmentAttribute(match[2]!))) ? "" : tag;
+  });
 }
 
 function ownedAttachment<Mime extends string>(

@@ -7,6 +7,7 @@ import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
+import { PdfCapabilities } from "./pdf-capabilities.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
   withOpenRouterTurns, type OpenRouterModelRow,
@@ -203,6 +204,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const answersAsOllama = () => isOllamaServer(config) || isOllama(ollamaOrigin(config.url));
     if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
     const apiKey = savedKey || (ollamaCandidate && isOllamaServer(config) ? OLLAMA_PLACEHOLDER_KEY : "");
+    const pdfCapabilities = new PdfCapabilities(config.url, apiKey);
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
       ? "No API key — open Settings → API keys."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
@@ -306,6 +308,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         const options: ModelCatalog["options"] = [];
         for (const row of rows) {
           const rawId = typeof row.id === "string" ? row.id : "";
+          if (rawId) pdfCapabilities.declare(rawId, row);
           const id = gemini ? geminiChatModelId(rawId) ?? "" : rawId;
           if (!id || seen.has(id) || isContextName(id)) continue;
           seen.add(id);
@@ -371,6 +374,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       tools: config.tools,
       computerUse: true,
       pdfInput: true,
+      pdfSupport: (model) => pdfCapabilities.support(model),
+      recordPdfSupport: (model, supported) => pdfCapabilities.record(model, supported),
       nudgeAnnouncedAction: true,
       models: () => catalog,
       refreshModels: fetchModels,

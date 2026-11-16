@@ -47,6 +47,7 @@ Use only mapped, tested commands:
 - [Chat turns](chat-turns.md)
 - [OpenAI reply readout](openai-readout.md)
 - [Conversation context compaction](context-compaction.md)
+- [Persistent conversation PDF references](conversation-pdfs.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [Per-bot tool selection and local-model checks](tool-selection.md)

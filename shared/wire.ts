@@ -456,6 +456,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
   text?: string;
   digest?: TurnDigest;
+  /** User-uploaded PDF references owned by this message. IDs are private attachment-store basenames, never paths
+   * or provider file IDs. Replayed from the active conversation branch independently of text compaction. */
+  pdfReferences?: Array<{ id: string; name: string; bytes: number }>;
   /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
   engineCompaction?: true;
   compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness";
