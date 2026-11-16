@@ -9,11 +9,10 @@ export function chatPdfParts(pdfs: readonly TurnPdfInput[], attachmentsDir = ATT
   let total = 0;
   return pdfs.map((pdf) => {
     const storedName = basename(pdf.path);
-    // eslint-disable-next-line no-control-regex -- Intentionally remove control characters from PDF filenames.
-    const suggestedName = pdf.name.split(/[\\/]/).at(-1)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
-
-    const filename = suggestedName && /\.pdf$/i.test(suggestedName) ? suggestedName : storedName;
-    const suggestedName = pdf.name.split(/[\\/]/).at(-1)?.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 160);
+    const suggestedName = [...(pdf.name.split(/[\\/]/).at(-1) ?? "")]
+      .filter((char) => char.charCodeAt(0) >= 32 && char.charCodeAt(0) !== 127)
+      .join("")
+      .slice(0, 160);
     const filename = suggestedName && /\.pdf$/i.test(suggestedName) ? suggestedName : storedName;
     const path = resolve(attachmentsDir, storedName);
     if (resolve(pdf.path) !== path || dirname(realpathSync(path)) !== realpathSync(attachmentsDir)) {
