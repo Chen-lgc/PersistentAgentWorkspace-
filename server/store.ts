@@ -21,6 +21,7 @@ import { pickBotName } from "./names.ts";
 import { rotationColor } from "./bot-look.ts";
 import { redactBotAuthored } from "./message-redaction.ts";
 import { conversationPdfs, messagePdfReferences } from "./conversation-pdfs.ts";
+import { pruneScreenFrames } from "./screen-frames.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
@@ -1171,7 +1172,7 @@ export class Store {
     t.messages.push(full);
     t.activeLeafId = full.id;
     if (full.kind === "screen") {
-      for (const pruned of this.pruneScreenFrames(t)) {
+      for (const pruned of pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
@@ -1192,7 +1193,7 @@ export class Store {
     t.messages.push(full);
     mdb.insertMessage(threadId, full);
     if (full.kind === "screen") {
-      for (const pruned of this.pruneScreenFrames(t)) {
+      for (const pruned of pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
@@ -1211,21 +1212,6 @@ export class Store {
     );
     if (!card?.card) return null;
     return this.patchMessage(threadId, card.id, { card: { ...card.card, dismissed: true } });
-  }
-
-  private pruneScreenFrames(t: { messages: Message[] }, keep = 4): Message[] {
-    const pruned: Message[] = [];
-    let seen = 0;
-    for (let i = t.messages.length - 1; i >= 0 && seen < t.messages.length; i--) {
-      const m = t.messages[i];
-      if (m.kind !== "screen" || !m.png) continue;
-      seen += 1;
-      if (seen > keep) {
-        m.png = undefined;
-        pruned.push(m);
-      }
-    }
-    return pruned;
   }
 
   branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"], dataContext?: Message["dataContext"]): Message | null {
