@@ -20,6 +20,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { hasTeamAuthority } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { DEFAULT_BOT_NAME } from "../shared/default-bot.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -1586,19 +1587,19 @@ describe("Store", () => {
     expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
   });
 
-  it("seedIfEmpty makes the new install's Chief its MausBot in chrome, introduced, and no bot after it takes chrome or silver in turn", () => {
+  it("seedIfEmpty makes the new install's Chief its default bot in chrome, introduced, and no bot after it takes chrome or silver in turn", () => {
     const store = new Store(selection);
     store.seedIfEmpty();
     const chief = store.bots[0]!;
-    expect(chief).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
+    expect(chief).toMatchObject({ name: DEFAULT_BOT_NAME, color: "chrome", chiefOfStaff: true, defaultBot: {} });
     expect(store.messagesFor(chief.threadId).map((message) => [message.kind, message.helperIntro, message.card?.options.length])).toEqual([["options", true, 4]]);
-    expect(store.messagesFor(chief.threadId)[0]!.text).toContain("Hey! I'm MausBot. I'm new here. I'm here to be your Chief of Staff.");
+    expect(store.messagesFor(chief.threadId)[0]!.text).toContain(`Hey! I'm ${DEFAULT_BOT_NAME}. I'm new here. I'm here to be your Chief of Staff.`);
     const later = Array.from({ length: 25 }, () => store.createBot());
     expect(later.map((bot) => bot.color)).not.toContain("silver");
     expect(later.map((bot) => bot.color)).not.toContain("chrome");
     expect(later[0]?.color).toBe("blue");
-    expect(later.map((bot) => bot.name)).not.toContain("MausBot");
-    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: "MausBot", color: "chrome", defaultBot: {} });
+    expect(later.map((bot) => bot.name)).not.toContain(DEFAULT_BOT_NAME);
+    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: DEFAULT_BOT_NAME, color: "chrome", defaultBot: {} });
   });
 
   it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
