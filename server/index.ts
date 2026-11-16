@@ -332,7 +332,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts"; import { isFreshStart, sinceFreshStart } from "./fresh-start.ts";
-import { extractReplayImages, extractTurnImages, extractTurnPdfs, videoFramesWithin } from "./turn-images.ts";
+import { extractReplayImages, extractRoomTurnPdfs, extractTurnImages, extractTurnPdfs, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle, llmThreadTitlesEnabled } from "./thread-title-generate.ts";
 import { engineProcessGone, stallLimitMs, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts";
@@ -9779,7 +9779,6 @@ async function runClaimedGroupMemberTurn(
   const burstIds = new Set(operation?.queuedQueueIds ?? []);
   const burstOverrides: Array<{ messageId: string; text: string }> = [];
   const burstImages: ReturnType<typeof extractTurnImages>["images"] = [];
-  const burstPdfs: ReturnType<typeof extractTurnPdfs> = [];
   if (usesNativeImageInput && !cardContinuation) {
     for (const message of store.activePath(threadId)) {
       if (message.role !== "user" || message.kind !== "text" || !message.text) continue;
@@ -9787,7 +9786,6 @@ async function runClaimedGroupMemberTurn(
       const resolved = extractTurnImages(message.text);
       burstOverrides.push({ messageId: message.id, text: resolved.text });
       burstImages.push(...resolved.images, ...await videoFramesWithin(burstImages.length + resolved.images.length, resolved.videos));
-      if (instance.driverKind === "openai-compat") burstPdfs.push(...extractTurnPdfs(message.text));
     }
   }
   // The latest line is usually the burst's last: extracting it again would double-count its attachments.
@@ -9807,9 +9805,7 @@ async function runClaimedGroupMemberTurn(
   );
   const roomContext = roomWindow.text;
   const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos)] : [];
-  const turnPdfs = instance.driverKind === "openai-compat"
-    ? [...burstPdfs, ...(!cardContinuation && !latestInBurst && latestUser?.text ? extractTurnPdfs(latestUser.text) : [])]
-    : [];
+  const turnPdfs = extractRoomTurnPdfs(instance.driverKind, burstOverrides.map(({ text }) => text), !cardContinuation && !latestInBurst ? latestUser?.text : undefined);
   const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(

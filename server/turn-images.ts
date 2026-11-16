@@ -97,6 +97,11 @@ export function extractTurnPdfs(text: string, attachmentsDir = ATTACHMENTS_DIR):
   return pdfs;
 }
 
+export function extractRoomTurnPdfs(driverKind: string, burstTexts: readonly string[], latestText?: string): TurnPdfInput[] {
+  if (driverKind !== "openai-compat") return [];
+  return [...burstTexts, ...(latestText ? [latestText] : [])].flatMap((text) => extractTurnPdfs(text));
+}
+
 export function withoutTurnPdfTags(text: string, pdfs: readonly TurnPdfInput[]): string {
   if (!pdfs.length || !text.includes("<attached-file")) return text;
   const paths = new Set(pdfs.map((pdf) => resolve(pdf.path)));
