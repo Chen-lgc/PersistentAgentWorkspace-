@@ -13,7 +13,7 @@ export const TURN_IMAGE_MAX_COUNT = 10;
 export const TURN_IMAGE_MAX_BYTES = 4 * IMAGE_MAX_BYTES;
 // A video is sampled into several frames before it reaches a model, so only the first one in a message is sampled.
 export const TURN_VIDEO_MAX_COUNT = 1;
-export const TURN_PDF_MAX_BYTES = 20 * 1024 * 1024;
+export const TURN_PDF_MAX_BYTES = 50 * 1024 * 1024;
 
 type MarkdownNode = {
   type: string;
