@@ -2,12 +2,13 @@
 // other endpoints that speak the OpenAI chat-completions contract.
 import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
 import { operatorEnvKey } from "../credential-env.ts";
-import { isLoopback } from "../provider-key-check.ts";
+import { apiKeyFormatError, isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import { PdfCapabilities } from "./pdf-capabilities.ts";
+import { isKimiFilesEndpoint, KimiPdfs } from "./kimi-pdfs.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
   withOpenRouterTurns, type OpenRouterModelRow,
@@ -255,7 +256,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     };
 
     const fetchModels = async () => {
-      if (!apiKey) return;
+      if (!apiKey || apiKeyFormatError(apiKey)) return;
       if (ollamaCandidate && await listOllama()) return;
       if (config.managedModels) return;
       try {
@@ -365,6 +366,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     // The first list says which models can call tools, and is what the engine list shows right after adding Ollama.
     if (loading && isOllamaServer(config)) await Promise.race([loading, new Promise((done) => { setTimeout(done, OLLAMA_FIRST_LIST_MS).unref(); })]);
 
+    const kimiPdfs = isKimiFilesEndpoint(config.url) ? new KimiPdfs(config.url, apiKey) : undefined;
     const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
@@ -374,6 +376,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       tools: config.tools,
       computerUse: true,
       pdfInput: true,
+      ...(kimiPdfs ? { pdfText: (pdfs, signal) => kimiPdfs.text(pdfs, signal) } : {}),
       pdfSupport: (model) => pdfCapabilities.support(model),
       recordPdfSupport: (model, supported) => pdfCapabilities.record(model, supported),
       nudgeAnnouncedAction: true,

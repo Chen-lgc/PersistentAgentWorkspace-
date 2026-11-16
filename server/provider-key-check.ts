@@ -26,6 +26,12 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
 
 const MAX_MODELS = 5;
 
+export function apiKeyFormatError(key: string): string | null {
+  return /[^\x21-\x7e]/.test(key)
+    ? "API Key 格式有误：不能包含空格、换行、中文或 ✓ 等非 ASCII 字符。请从服务商控制台重新复制密钥本身，不要包含页面或终端提示文字。"
+    : null;
+}
+
 /** A URL hostname on this machine: the only place a key may go over plain http. */
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
@@ -60,7 +66,7 @@ export async function checkProviderKey(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 10_000,
 ): Promise<ProviderKeyVerdict> {
-  if (!input.key.trim()) return { ok: false, reason: "rejected" };
+  if (!input.key.trim() || apiKeyFormatError(input.key)) return { ok: false, reason: "rejected" };
   let url: URL;
   try {
     url = new URL(providerModelsUrl(input.provider, input.url));

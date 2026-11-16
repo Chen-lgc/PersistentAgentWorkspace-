@@ -1,4 +1,4 @@
-import type { DriverCreateInput, ModelCatalog, ProviderSnapshot, SendTurnInput } from "../contracts.ts";
+import type { DriverCreateInput, ModelCatalog, ProviderSnapshot, SendTurnInput, TurnPdfInput } from "../contracts.ts";
 import type { ChatToolDefinition } from "./chat-mcp-tools.ts";
 import type { Completion, OpenAIChatMessage } from "./openai-chat.ts";
 
@@ -41,6 +41,8 @@ export interface RuntimeOptions<Config> {
   computerUse?: boolean;
   pdfInput?: boolean;
   pdfAttachmentDir?: string;
+  /** Provider file extraction instead of native file parts; runs within the cancellable turn, independently of native PDF capability. */
+  pdfText?: (pdfs: readonly TurnPdfInput[], signal: AbortSignal) => Promise<string>;
   /** Native PDF support for this endpoint and model. Unknown is probed by sending the actual attachment. */
   pdfSupport?: (model: string) => boolean | undefined;
   recordPdfSupport?: (model: string, supported: boolean) => void;

@@ -6,6 +6,12 @@ import { TURN_PDF_MAX_BYTES } from "../turn-images.ts";
 import type { ChatFilePart } from "./chat-images.ts";
 
 export function chatPdfParts(pdfs: readonly TurnPdfInput[], attachmentsDir = ATTACHMENTS_DIR): ChatFilePart[] {
+  return readPdfAttachments(pdfs, attachmentsDir).map(({ filename, data }) => ({
+    type: "file", file: { filename, file_data: `data:application/pdf;base64,${data.toString("base64")}` },
+  }));
+}
+
+export function readPdfAttachments(pdfs: readonly TurnPdfInput[], attachmentsDir = ATTACHMENTS_DIR): Array<{ filename: string; data: Buffer }> {
   if (pdfs.reduce((total, pdf) => total + pdf.bytes, 0) > TURN_PDF_MAX_BYTES) {
     throw new Error(`PDF references for one model turn are limited to ${TURN_PDF_MAX_BYTES / 1024 / 1024} MB total. Start a new conversation with fewer files.`);
   }
@@ -35,7 +41,7 @@ export function chatPdfParts(pdfs: readonly TurnPdfInput[], attachmentsDir = ATT
       const data = readFileSync(fd);
       if (!data.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("The attached file is not a PDF.");
       total += data.length;
-      return { type: "file", file: { filename, file_data: `data:application/pdf;base64,${data.toString("base64")}` } };
+      return { filename, data };
     } finally {
       closeSync(fd);
     }

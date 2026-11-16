@@ -78,6 +78,7 @@ export function rejectsPdfInput(status: number, body: string, pdfMessageIndexes:
   return /\b(?:does not|doesn't|cannot|can't) (?:support|accept|process|read) (?:\w+\s+){0,3}(?:pdfs?|files?|documents?)\b/i.test(detail)
     || /\b(?:pdf|file|document)(?:s| input| inputs| uploads| attachments)?\b.{0,60}\b(?:not supported|unsupported|not allowed|not permitted)\b/i.test(detail)
     || /\bunsupported (?:content |input |message )?(?:type|format|value)\s*:?\s*['"]?(?:file|input_file|pdf)\b/i.test(detail)
+    || /\b(?:invalid|unsupported|unknown|unrecognized)\s+(?:(?:content|input|message)\s+)?part\s+type\s*:\s*['"`]?(?:file|input_file)\b/i.test(detail)
     || /\binvalid value\s*:\s*['"](?:file|input_file)['"].{0,120}supported values/i.test(detail)
     || /\bunknown variant\s*['"`](?:file|input_file)['"`].{0,120}expected/i.test(detail)
     || /\b(?:pdf|file)\b.{0,100}\b(?:use|requires?|only available (?:with|through|in))\b.{0,60}\bresponses\b/i.test(detail)

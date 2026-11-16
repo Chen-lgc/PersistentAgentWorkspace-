@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { InstanceConfig, InstanceConfigMap } from "./contracts.ts";
+import { apiKeyFormatError } from "./provider-key-check.ts";
 
 export const ADDED_ENDPOINT_PREFIX = "openai-compat-";
 
@@ -42,6 +43,8 @@ export function isAddedEndpoint(instanceId: string, entry: InstanceConfig | unde
 export function addEndpoint(instances: InstanceConfigMap, body: AddEndpoint): { instanceId: string } | { error: string } {
   const url = endpointBaseUrl(body.url);
   if (!url) return { error: "Enter an http or https base URL without a user name, password or query string." };
+  const keyError = apiKeyFormatError(body.key);
+  if (keyError) return { error: keyError };
   if (/^https?:\/\//i.test(body.key)) return { error: "That API key looks like a URL. Paste the secret key itself, not a web address." };
   const instanceId = `${ADDED_ENDPOINT_PREFIX}${randomUUID()}`;
   const models = [...new Set(body.models ?? [])];

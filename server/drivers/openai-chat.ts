@@ -39,6 +39,7 @@ import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rej
 import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
 import type { RuntimeOptions } from "./openai-chat-options.ts";
 import { announcesAction } from "./chat-announcement.ts";
+import { apiKeyFormatError } from "../provider-key-check.ts";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -215,6 +216,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     tools: ChatToolDefinition[] = [],
     onUsage?: TextGenerationOptions["onUsage"], variant?: string,
   ): Promise<Completion> => {
+    const keyError = apiKeyFormatError(options.apiKey);
+    if (keyError) throw new Error(keyError);
     const timeoutController = new AbortController();
     let idleTimer: NodeJS.Timeout | null = null;
     const resetIdleTimer = () => {
@@ -480,10 +483,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
+    const keyError = apiKeyFormatError(options.apiKey);
+    if (keyError) throw new Error(keyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
     if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
     const model = turn.model || options.models().default;
-    let pdfAttached = Boolean(options.pdfInput && turn.pdfs?.length && options.pdfSupport?.(model) !== false);
+    const extractPdfs = Boolean(options.pdfText && turn.pdfs?.length);
+    let pdfAttached = Boolean(!extractPdfs && options.pdfInput && turn.pdfs?.length && options.pdfSupport?.(model) !== false);
     const pdfParts = pdfAttached ? chatPdfParts(turn.pdfs ?? [], options.pdfAttachmentDir) : [];
 
     const turnId = newId();
@@ -559,7 +565,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
-    if (turn.pdfs?.length && !pdfAttached) usePdfHistoryOnly();
+    if (turn.pdfs?.length && !pdfAttached && !extractPdfs) usePdfHistoryOnly();
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -579,6 +585,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
+        if (extractPdfs) {
+          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: "正在准备会话 PDF 的文件解析内容；已解析过的文件将复用本地缓存。" });
+          const content = await options.pdfText!(turn.pdfs!, abort.signal);
+          abort.signal.throwIfAborted();
+          messages.splice(messages[0]?.role === "system" ? 1 : 0, 0, { role: "system", content });
+          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `已为 ${model} 准备 ${turn.pdfs!.length} 份会话 PDF 的解析文字及历史对话；PDF 原图未直接传入模型。` });
+        }
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
@@ -936,6 +949,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const down = await options.serverUnavailable?.();
       if (down) return { state: "unavailable", ...down };
       if (!options.apiKey) return { state: "unavailable", reason: options.unavailableReason };
+      const keyError = apiKeyFormatError(options.apiKey);
+      if (keyError) return { state: "unavailable", reason: keyError };
       if (keyRejected(options.apiUrl, options.apiKey)) return { state: "available", authenticated: false, reason: KEY_REJECTED_REASON, version: null };
       return { state: "available", authenticated: true, version: null, ...(options.billing ? { billing: options.billing } : {}) };
     },
