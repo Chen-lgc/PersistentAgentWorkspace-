@@ -15,7 +15,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { toolBudgetOf } from "../tool-budgets.ts";
 import { isOpenAIChatModel, OpenAICompatDriver } from "./openai-compat.ts";
-import { createModelRoutes, isOpenAIAddress, responsesRequest, routeRefusal } from "./openai-responses.ts";
+import { createModelRoutes, responsesRequest, routeRefusal } from "./openai-responses.ts";
 
 const OPENAI = "https://api.openai.com/v1";
 const MODEL = "gpt-6.1-sol";
@@ -156,15 +156,8 @@ const failureOf = (events: Array<{ type: string; message?: string }>) => events.
 const textOf = (events: Array<Record<string, any>>, kind: string) => events.filter((event) => event.type === "content.delta" && event.streamKind === kind).map((event) => event.delta).join("");
 
 describe("which API a model's turn uses", () => {
-  it("names OpenAI's own address, and nothing that only resembles it", () => {
-    for (const url of [OPENAI, `${OPENAI}/`, "https://eu.api.openai.com/v1"]) expect(isOpenAIAddress(url)).toBe(true);
-    for (const url of ["http://api.openai.com/v1", "https://api.openai.com.evil.test/v1", "https://openrouter.ai/api/v1", "https://example.com/api.openai.com/v1", "https://api.openai.com/openai/v1", "not a url"]) {
-      expect(isOpenAIAddress(url)).toBe(false);
-    }
-  });
-
   it("only moves a model forward, so a resend cannot loop", () => {
-    const own = createModelRoutes(OPENAI);
+    const own = createModelRoutes();
     expect(own.routeFor(MODEL, true)).toBe("chat");
     expect(own.advance(MODEL, "tools-need-responses")).toBe(true);
     expect(own.routeFor(MODEL, true)).toBe("responses");
@@ -175,11 +168,6 @@ describe("which API a model's turn uses", () => {
     expect(own.routeFor(MODEL, true)).toBe("chat-reasoning-off");
     expect(own.advance(MODEL, "tools-need-responses")).toBe(false);
     expect(own.advance(MODEL, "responses-unavailable")).toBe(false);
-
-    const other = createModelRoutes("https://relay.example/v1");
-    expect(other.advance(MODEL, "tools-need-responses")).toBe(true);
-    expect(other.routeFor(MODEL, true)).toBe("chat-reasoning-off");
-    expect(other.advance(MODEL, "tools-need-responses")).toBe(false);
   });
 
   it("reads the answer, not the model's name", () => {
@@ -607,31 +595,54 @@ describe("the fallback when Responses is not an option", () => {
 });
 
 describe("the same refusal from another provider", () => {
+  it("uses a relay's Responses API when it is available", async () => {
+    const f = await fixture((call, response) => {
+      if (call.path.endsWith("/chat/completions")) return reject(response, 400, refusalOf(MODEL));
+      answer(response, "Relayed.");
+    }, "relay");
+    const first = await f.turn();
+    expect(first.end).toMatchObject({ ok: true });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses"]);
+    expect(f.calls[1]!.body).not.toHaveProperty("reasoning_effort");
+    expect(textOf(first.events, "assistant_text")).toBe("Relayed.");
+
+    expect(await f.turn()).toMatchObject({ end: { ok: true } });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/responses"]);
+  });
+
   it("stays on Chat Completions with reasoning off, and remembers per model", async () => {
     const f = await fixture((call, response) => {
+      if (call.path.endsWith("/responses")) return reject(response, 404, "");
       if (call.body.reasoning_effort !== "none") return reject(response, 400, refusalOf(MODEL));
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Relayed." }, finish_reason: "stop" }] })}\n\n`);
       response.end("data: [DONE]\n\n");
     }, "relay");
     expect(await f.turn()).toMatchObject({ end: { ok: true } });
-    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions"]);
-    expect(f.calls[1]!.body).toMatchObject({ reasoning_effort: "none", tools: expect.any(Array), messages: expect.any(Array) });
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/chat/completions"]);
+    expect(f.calls[2]!.body).toMatchObject({ reasoning_effort: "none", tools: expect.any(Array), messages: expect.any(Array) });
 
     await f.turn();
-    expect(f.calls).toHaveLength(3);
-    expect(f.calls[2]!.body).toMatchObject({ reasoning_effort: "none" });
+    expect(f.calls).toHaveLength(4);
+    expect(f.calls[3]!.body).toMatchObject({ reasoning_effort: "none" });
 
     await f.turn({ model: "other-model" });
-    expect(f.calls[3]!.body).not.toHaveProperty("reasoning_effort");
-    expect(f.calls[4]!.body).toMatchObject({ reasoning_effort: "none" });
+    expect(f.calls[4]!.body).not.toHaveProperty("reasoning_effort");
+    expect(f.calls[5]!.path).toBe("/v1/responses");
+    expect(f.calls[6]!.body).toMatchObject({ reasoning_effort: "none" });
   });
 
-  it("tries once, and never sends anything to /responses", async () => {
-    const f = await fixture((_call, response) => reject(response, 400, refusalOf(MODEL)), "relay");
-    const { end, events: seen } = await f.turn();
+  it("reports the actual limitation when the relay has no Responses route and the model rejects none", async () => {
+    const astra = "gpt-6-astra";
+    const noneRefused = JSON.stringify({ error: {
+      message: "Unsupported value: 'reasoning_effort' does not support 'none' with this model. Supported values are: 'low', 'medium', 'high', and 'xhigh'.",
+      code: "unsupported_value",
+    } });
+    const f = await fixture((call, response) => reject(response, call.path.endsWith("/responses") ? 404 : 400,
+      call.body.reasoning_effort === "none" ? noneRefused : refusalOf(astra)), "relay");
+    const { end, events: seen } = await f.turn({ model: astra });
     expect(end).toMatchObject({ ok: false });
-    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/chat/completions"]);
+    expect(f.paths()).toEqual(["/v1/chat/completions", "/v1/responses", "/v1/chat/completions"]);
     expect(failureOf(seen)).toContain("Choose another model");
   });
 });

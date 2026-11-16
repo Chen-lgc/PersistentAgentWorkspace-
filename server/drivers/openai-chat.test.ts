@@ -19,6 +19,46 @@ afterEach(() => vi.unstubAllGlobals());
 
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 
+it("lets a remote HTTP endpoint answer text without exposing computer or browser tools", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
+    requests.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    return sse('data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  }));
+  const instance = await OpenAICompatDriver.create({
+    instanceId: "remote-http", displayName: "Remote HTTP", enabled: true,
+    config: OpenAICompatDriver.decodeConfig({ url: "http://remote.example.test/v1", key: "fixture-key", managedModels: ["fixture-model"] }),
+    environment: {},
+  });
+  const events: RuntimeEvent[] = [];
+  instance.adapter.onEvent((event) => events.push(event));
+  try {
+    await instance.adapter.sendTurn({
+      threadId: "text", text: "hi", model: "fixture-model",
+      integrations: {
+        localComputer: { command: "unused-computer", args: [], env: {} },
+        browser: { command: "unused-browser", args: [], env: {} },
+      },
+    });
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    });
+    expect(events).toContainEqual(expect.objectContaining({ type: "turn.completed", ok: true }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "runtime.notice", message: expect.stringContaining("Use HTTPS") }));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe("http://remote.example.test/v1/chat/completions");
+    expect(JSON.stringify(requests[0]!.body.tools ?? [])).not.toMatch(/computer|browser/);
+
+    await expect(instance.adapter.sendTurn({
+      threadId: "image", text: "inspect", model: "fixture-model",
+      images: [{ path: "unused.png", mime: "image/png", bytes: 1 }],
+    })).rejects.toThrow("require HTTPS");
+    expect(requests).toHaveLength(1);
+  } finally {
+    await instance.dispose();
+  }
+});
+
 /** `body` is every request's stream, or a factory per chat completion (the catalog fetch then gets a 404). */
 async function runTurn(body: string | (() => Response), driver: "openai-compat" | "minimax" = "openai-compat") {
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL) => typeof body === "string" ? sse(body)

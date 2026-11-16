@@ -19,10 +19,14 @@ export function chatImageBudget() {
   };
 }
 
-export function assertImageTransport(url: string) {
+export function imageTransportAllowed(url: string): boolean {
   const endpoint = new URL(url);
   const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(endpoint.hostname);
-  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback)) {
+  return endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback);
+}
+
+export function assertImageTransport(url: string) {
+  if (!imageTransportAllowed(url)) {
     throw new Error("Images and computer tools require HTTPS for remote API endpoints; HTTP is supported only on loopback.");
   }
 }

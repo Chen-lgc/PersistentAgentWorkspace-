@@ -15,7 +15,7 @@ import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
-import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
+import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, imageTransportAllowed, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
@@ -162,7 +162,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     ending: boolean;
   }>();
   const reasoningReplayRejected = new Set<string>();
-  const routes = createModelRoutes(options.apiUrl);
+  const routes = createModelRoutes();
   /** Beside the messages, not on them, so encrypted reasoning never reaches a Chat Completions body, a log or a handoff. */
   const responseOutputs = new WeakMap<OpenAIChatMessage, ResponseItem[]>();
   const assistantReply = (model: string, completion: Completion, content: string | null, toolCalls?: ChatToolCall[]): OpenAIChatMessage => {
@@ -466,7 +466,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-    if (options.computerUse && ((turn.images?.length && seesImages(turn)) || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
+    if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
 
     const turnId = newId();
     const abort = new AbortController();
@@ -555,7 +555,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
-        tools = await mountChatTools(toolsOff ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
+        const remoteHttp = options.computerUse && !imageTransportAllowed(options.apiUrl);
+        const toolIntegrations = remoteHttp
+          ? { ...turn.integrations, localComputer: undefined, browser: undefined }
+          : turn.integrations;
+        if (!toolsOff && remoteHttp && (turn.integrations?.localComputer || turn.integrations?.browser)) {
+          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: "Computer and browser tools are unavailable for remote HTTP model endpoints. Use HTTPS to enable them." });
+        }
+        tools = await mountChatTools(toolsOff ? undefined : toolIntegrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
           toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model));
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });

@@ -24,17 +24,9 @@ export function noRouteLeft(provider: string): string {
   return `This model can only use tools through OpenAI's Responses API, and this API address or key can't reach it. Choose another model. Provider: ${provider.slice(0, 300)}`;
 }
 
-export function isOpenAIAddress(apiUrl: string): boolean {
-  let url: URL;
-  try { url = new URL(apiUrl); } catch { return false; }
-  const own = url.hostname === "api.openai.com" || url.hostname.endsWith(".api.openai.com");
-  return own && url.protocol === "https:" && url.pathname.replace(/\/+$/, "") === "/v1";
-}
-
 /** Each model only moves forward (chat, responses, chat-reasoning-off), so a resend can never loop. A call without tools
  * never meets the refusal and stays on Chat Completions. */
-export function createModelRoutes(apiUrl: string) {
-  const servesResponses = isOpenAIAddress(apiUrl);
+export function createModelRoutes() {
   const routes = new Map<string, ModelRoute>();
   const noSummaries = new Set<string>();
   return {
@@ -49,7 +41,7 @@ export function createModelRoutes(apiUrl: string) {
         return true;
       }
       if (refusal === "tools-need-responses" && route === "chat") {
-        routes.set(model, servesResponses ? "responses" : "chat-reasoning-off");
+        routes.set(model, "responses");
         return true;
       }
       if (refusal === "responses-unavailable" && route === "responses") {
