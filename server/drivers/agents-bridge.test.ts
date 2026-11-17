@@ -78,6 +78,7 @@ describe("what a bridged turn is listed", () => {
       "list_bots",
       "list_rooms",
       "select_computer",
+      "workspace_file",
       "attach_file",
       "publish_page",
       "post_to_room",
@@ -98,6 +99,7 @@ describe("what a bridged turn is listed", () => {
       "list_bots",
       "list_rooms",
       "select_computer",
+      "workspace_file",
       "attach_file",
       "publish_page",
       "post_to_room",
@@ -120,7 +122,7 @@ describe("what a bridged turn is listed", () => {
       const tools = availableTools(turn);
       const hot = createToolBridge(tools as BridgeTool[]).listed.length - 2;
       expect(hot, name).toBeGreaterThanOrEqual(12);
-      expect(hot, name).toBeLessThanOrEqual(15);
+      expect(hot, name).toBeLessThanOrEqual(16);
       expect(hot, name).toBeLessThan(tools.length / 2);
     }
   });

@@ -9,6 +9,7 @@ import { ACTION_ICON, ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, 
 import { copyText } from "@/lib/copy-text";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
 import { useBotMessageMenu, userMessageMenu } from "@/components/message-menu";
+import { ConversationFileLinks, ConversationFilesButton, ConversationFilesProvider } from "./ConversationFiles";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { computerStartLine, useScreensWhile } from "@/lib/computer-start";
@@ -559,6 +560,7 @@ const Bubble = memo(function Bubble({
                 <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} mentionPerson={mentionPerson} message={{ threadId, messageId: message.id }} delivered={group?.delivered} originals={group?.originals} /></div>
               ) : null}
               {group && <AttachmentGallery images={group.images} files={group.files} originals={group.originals} message={{ threadId, messageId: message.id }} eager={eagerAttachments} beneath />}
+              <ConversationFileLinks threadId={threadId} names={message.workspaceFiles} />
             </MessageBoundary>
           )}
         </div>
@@ -1004,6 +1006,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
   return (
     <ThreadLinkContext value={threadLink}>
+    <ConversationFilesProvider threadId={bot.threadId} canWrite={canWrite !== false}>
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <CallOverlay bot={bot} />
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
@@ -1110,6 +1113,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           <ThreadContextWarning bot={bot} messages={messages} />
+          <ConversationFilesButton />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
           {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
@@ -1301,6 +1305,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       </GlassScrollFrame>
 
     </main>
+    </ConversationFilesProvider>
     </ThreadLinkContext>
   );
 }

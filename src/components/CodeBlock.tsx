@@ -1,7 +1,8 @@
 // Security: Shiki's output is generator-escaped; nothing else reaches the DOM as HTML.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { HighlighterCore } from "shiki/core";
-import { Check, Copy, Download, MoreHorizontal, WrapText, X } from "lucide-react";
+import { Check, Copy, Download, FolderPlus, MoreHorizontal, WrapText, X } from "lucide-react";
+import { ConversationFilesContext } from "@/lib/conversation-files";
 
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
@@ -197,6 +198,8 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
 }
 
 export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
+  const workspace = useContext(ConversationFilesContext);
+  const saveToWorkspace = workspace?.canWrite ? () => workspace.open({ name: getSnippetFileName(lang), content: code }) : undefined;
   const simple = !useAdvancedMode();
   const frame = useRef<HTMLDivElement>(null);
   // A long chat can hold dozens of blocks: coloured ones are thousands of spans to style and lay out on every switch,
@@ -258,6 +261,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
         <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copyTitle")} items={[
           { key: "wrap", label: t("code.wrapLines"), icon: <WrapText size={14} aria-hidden="true" />, active: wrapLines, onSelect: () => setWrapLines((wrap) => !wrap) },
           { key: "save", label: t("code.saveAsFile"), icon: <Download size={14} aria-hidden="true" />, onSelect: download },
+          ...(saveToWorkspace ? [{ key: "workspace", label: t("workspaceFiles.saveTo"), icon: <FolderPlus size={14} aria-hidden="true" />, onSelect: saveToWorkspace }] : []),
           { key: "about", label: t("code.caption", { language: displayLanguage, lines: formatLineCount(lineCount) }), disabled: true, separatorBefore: true, onSelect: () => {} },
         ]} />
         {body("leading-5 [&_pre]:px-3 [&_pre]:py-2", "text-ink-secondary")}
@@ -279,6 +283,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
           )}
         </div>
         <div className="chat-code-actions flex shrink-0 items-center gap-1 whitespace-nowrap">
+          {saveToWorkspace && <button type="button" onClick={saveToWorkspace} className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink" title={t("workspaceFiles.saveTo")} aria-label={t("workspaceFiles.saveTo")}><FolderPlus size={12} aria-hidden="true" /><span>{t("workspaceFiles.title")}</span></button>}
           <button
             type="button"
             onClick={() => setWrapLines((w) => !w)}

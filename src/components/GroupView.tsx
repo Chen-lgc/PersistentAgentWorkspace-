@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
 import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { useReactor } from "@/lib/cloud-guest";
+import { useReactor, useCanWriteIn } from "@/lib/cloud-guest";
+import { ConversationFileLinks, ConversationFilesProvider } from "./ConversationFiles";
 import { otherSpeaker } from "@/lib/own-profile";
 import { Check, ChevronDown, FolderOpen, Loader2, Pin, Square, X } from "lucide-react";
 import {
@@ -289,6 +290,7 @@ function RoomTextMessage({
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={peers} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} originals={replyGroup?.originals} /></div>
               ) : null}
               {replyGroup && <AttachmentGallery images={replyGroup.images} files={replyGroup.files} originals={replyGroup.originals} message={{ threadId: group.threadId, messageId: m.id }} eager={eager} beneath />}
+              <ConversationFileLinks threadId={group.threadId} names={m.workspaceFiles} />
             </MessageBoundary>
           )}
         </div>
@@ -877,6 +879,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   );
 }
 export function GroupView({ group }: { group: Group }) {
+  const canWriteFiles = useCanWriteIn(group.threadId);
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -999,6 +1002,7 @@ export function GroupView({ group }: { group: Group }) {
   useEffect(() => setMembersOpen(false), [group.id]);
 
   return (
+    <ConversationFilesProvider threadId={group.threadId} canWrite={canWriteFiles !== false && members.every((member) => member.yourAccess !== "view")}>
     <main className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
       {membersOpen && !remoteClient && !group.dm && (
@@ -1216,5 +1220,6 @@ export function GroupView({ group }: { group: Group }) {
       </div>
       </GlassScrollFrame>
     </main>
+    </ConversationFilesProvider>
   );
 }

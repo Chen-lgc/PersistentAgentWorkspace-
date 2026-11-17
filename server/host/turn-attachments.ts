@@ -59,16 +59,23 @@ export function landTurnFiles(
   files: readonly ParkedTurnAttachment[],
   /** How a new last line is written, so it carries what the thread's other lines carry. */
   append: (line: Omit<Message, "id" | "at">) => unknown,
+  workspaceFiles: readonly string[] = [],
 ): void {
   const { threadId, turnId, from } = turn;
-  if (!files.length) return;
+  if (!files.length && !workspaceFiles.length) return;
   const path = store.activePath(threadId);
   const reply = path.findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
   if (reply) {
-    store.patchMessage(threadId, reply.id, { attachments: [...(reply.attachments ?? []), ...files] });
+    store.patchMessage(threadId, reply.id, {
+      ...(files.length ? { attachments: [...(reply.attachments ?? []), ...files] } : {}),
+      ...(workspaceFiles.length ? { workspaceFiles: [...new Set([...(reply.workspaceFiles ?? []), ...workspaceFiles])] } : {}),
+    });
     return;
   }
-  const line = { role: "bot" as const, kind: "text" as const, text: "", attachments: [...files], turnId, ...(from ? { from } : {}) };
+  const line = { role: "bot" as const, kind: "text" as const,
+    text: workspaceFiles.length ? "Files saved." : "",
+    ...(workspaceFiles.length ? { textCode: "chat.notice.workspaceFilesSaved", workspaceFiles: [...new Set(workspaceFiles)] } : {}),
+    attachments: [...files], turnId, ...(from ? { from } : {}) };
   let ending: number | undefined;
   for (let i = path.length - 1; i >= 0; i -= 1) {
     if (isReceipt(path[i]!)) continue;

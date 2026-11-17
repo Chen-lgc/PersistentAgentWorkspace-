@@ -296,6 +296,7 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
     attempt("uploads", () => removeAttachments(new Set([...threads.values()].flatMap((found) => [...found.attachments]))));
     attempt("engine sessions", () => removeSessions(new Set([...threads.values()].flatMap((found) => [...found.sessions]))));
     for (const threadId of threads.keys()) attempt(`box uploads of ${threadId}`, () => removeBoxUploads(threadId));
+    for (const threadId of threads.keys()) attempt(`file workspace of ${threadId}`, () => void removeUnder(dataDir, join(dataDir, "conversation-files", threadId)));
     for (const botId of bots) removeBot(botId);
   }
 

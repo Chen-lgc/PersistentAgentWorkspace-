@@ -459,6 +459,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField, SetupCard
   /** User-uploaded PDF references owned by this message. IDs are private attachment-store basenames, never paths
    * or provider file IDs. Replayed from the active conversation branch independently of text compaction. */
   pdfReferences?: Array<{ id: string; name: string; bytes: number }>;
+  /** Successfully saved workspace file names from this turn, opened only in this message's conversation. */
+  workspaceFiles?: string[];
   /** kind "compaction" with no `compaction` record: the engine condensed its own session. A marker for people, never context. */
   engineCompaction?: true;
   compaction?: { summary: string; firstKeptId: string; foldedThroughId: string; tokensBefore: number; by: "person" | "harness";

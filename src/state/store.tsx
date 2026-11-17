@@ -125,6 +125,7 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
   attachments?: import("../../shared/wire").WireMessage["attachments"];
+  workspaceFiles?: import("../../shared/wire").WireMessage["workspaceFiles"];
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;

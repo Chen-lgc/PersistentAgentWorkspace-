@@ -24,6 +24,7 @@ import { RoomWorkingFolderChip } from "./RoomWorkingFolder";
 import { Select } from "./Select";
 import { GroupTaskPicker } from "./TaskPicker";
 import { ThreadPresenceFaces } from "./TeamPresence";
+import { ConversationFilesButton } from "./ConversationFiles";
 
 export function DefaultResponderSelect({ group, members }: { group: Group; members: Bot[] }) {
   const { state, dispatch } = useStore();
@@ -173,6 +174,7 @@ export function RoomHeader({
             {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
+            <ConversationFilesButton />
             <ThreadPresenceFaces threadId={group.threadId} />
             <button
               ref={membersTriggerRef}
@@ -222,6 +224,7 @@ export function RoomHeader({
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <ThreadPresenceFaces threadId={group.threadId} />
+          <ConversationFilesButton />
           <button
             type="button"
             onClick={onToggleFind}

@@ -56,6 +56,7 @@ const MODEL_CHOICE_ARGUMENT: Readonly<Record<string, string>> = { create_bot: "m
 
 export function dropBlankArguments(name: string, input: Json): Json {
   if (!jsonRecord(input)) return input;
+  if (name === "workspace_file") return withoutBlank(input, ["name", "revision"]);
   if (name === "propose_team_setup") return withoutBlankTeamSetupFields(input);
   const selectionKey = Object.hasOwn(MODEL_CHOICE_ARGUMENT, name) ? MODEL_CHOICE_ARGUMENT[name] : undefined;
   if (selectionKey && input[selectionKey] !== undefined) return { ...input, [selectionKey]: withoutBlankModelChoice(input[selectionKey]) };

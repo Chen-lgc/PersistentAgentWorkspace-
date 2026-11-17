@@ -10,6 +10,8 @@ import { homedir } from "node:os";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
+import { createConversationFiles, CONVERSATION_FILES_PROMPT } from "./conversation-files.ts";
+import { createConversationFileRoutes, conversationFilesInternal } from "./routes/conversation-files.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
@@ -2302,10 +2304,12 @@ const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
 
 const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
+const workspaceFilesByTurn = new Map<string, Set<string>>();
 
 const turnAttachmentKey = parkedFilesKey;
 
 function purgeTurnAttachmentsForThread(threadId: string): void {
+  for (const key of workspaceFilesByTurn.keys()) if (key.startsWith(`${threadId}:`)) workspaceFilesByTurn.delete(key);
   for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.startsWith(`${threadId}:`)) continue;
     turnAttachmentsByTurn.delete(key);
@@ -2326,6 +2330,7 @@ function clearCancelledProviderHandshake(threadId: string, ownerId: string): voi
 
 function retireProviderTurn(turnId: string): void {
   retiredProviderTurns.retire(turnId);
+  for (const key of workspaceFilesByTurn.keys()) if (key.endsWith(`:${turnId}`)) workspaceFilesByTurn.delete(key);
   for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.endsWith(`:${turnId}`)) continue;
     turnAttachmentsByTurn.delete(key);
@@ -6403,7 +6408,15 @@ bus.subscribe((event: RuntimeEvent) => {
     if (strays.length) console.warn(`[turn-files] thread=${event.threadId} turn=${event.turnId ?? "none"} took files parked under ${strays.join(", ")}`);
     const { land, discard } = settleParkedFiles(files, redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
     for (const file of discard) deleteAttachment(file.path);
-    landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage);
+    const workspaceFiles = new Set<string>();
+    const workspaceTurnKey = turnAttachmentKey(event.threadId, completedTurnId ?? liveTurnByThread.get(event.threadId));
+    for (const [key, names] of workspaceFilesByTurn) {
+      if (!key.startsWith(`${event.threadId}:`)) continue;
+      workspaceFilesByTurn.delete(key);
+      if (key !== workspaceTurnKey && key !== turnAttachmentKey(event.threadId)) continue;
+      if (!goalCoordinatorTurn && !ambiguousCoordinatorText) for (const name of names) workspaceFiles.add(name);
+    }
+    landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage, [...workspaceFiles]);
   };
 
   if (coordinatorVisibleText) pushAssistantText(coordinatorVisibleText, completedTurnId);
@@ -8367,6 +8380,7 @@ async function beginTurn(
           connectedApps: setupConnectedApps(bot, instance.adapter.capabilities.composioMcp === true, Boolean(integrations.composio)),
         }) },
         { id: "files", label: "File locations", text: worksInWorkspace ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
+        { id: "conversation-files", label: "Conversation files", text: integrations.agents ? CONVERSATION_FILES_PROMPT : "" },
         { id: "shell", label: "Long-running commands", text: worksInWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
@@ -10182,6 +10196,7 @@ async function runClaimedGroupMemberTurn(
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) }, { id: "people", label: "People", text: teamMessages.prompt(bot.id, threadId, Boolean(integrations.agents)) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
+    { id: "conversation-files", label: "Conversation files", text: integrations.agents ? CONVERSATION_FILES_PROMPT : "" },
     { id: "shell", label: "Long-running commands", text: workspace ? longCommandsPrompt(roomComputerPromptKind) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) + teamConnections.prompt(threadId, internalGeneration, integrations) },
     { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) },
@@ -12111,6 +12126,12 @@ ROUTES.push(createBotMessageRoutes({
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
 const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
+const conversationFiles = createConversationFiles(DATA_DIR);
+ROUTES.push(createConversationFileRoutes({
+  files: conversationFiles,
+  visible: (auth, threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)) && (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId),
+  writeRefusal: (auth, threadId) => workspaceMaintenance.active || moveFreeze.frozen() ? "The workspace is being moved or restored. Try again when it finishes." : cloudThreadRefusal(auth, threadId),
+}));
 const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, keys: mcpKeys, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, probeAs: (server) => mcpServersHost.probeAs(server), oauth: mcpOAuth });
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc, threadVisible: (auth, threadId) => (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId) }));
 const { react } = createReactions({
@@ -12961,7 +12982,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 403, { error: "the internal capability belongs to a different conversation" });
       }
       const readInternalBody = async () => {
-        const body = await readBody(req);
+        const body = await readBody(req, path === "/api/internal/workspace-files" ? 4 * 1024 * 1024 : 1_000_000);
         // Authorization at header time is not a lease: if the owning turn settled meanwhile, die before any side effect.
         if (!internalCapabilityIsActive(internalCapability)) {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
@@ -12985,6 +13006,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           throw Object.assign(new Error(TURN_ENDED_REFUSAL), { status: 401 });
         }
       };
+      if (await conversationFilesInternal(conversationFiles, { method, path, res, json, threadId: internalCapability.threadId, readBody: readInternalBody,
+        saved: (name) => {
+          const key = turnAttachmentKey(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId));
+          const names = workspaceFilesByTurn.get(key) ?? new Set<string>();
+          names.add(name);
+          workspaceFilesByTurn.set(key, names);
+        },
+      }) !== PASS) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);

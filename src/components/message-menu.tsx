@@ -1,4 +1,6 @@
-import { Code, Copy, Eye, Pencil, Pin, PinOff, RefreshCw, Square, Volume2 } from "lucide-react";
+import { Code, Copy, Eye, FolderPlus, Pencil, Pin, PinOff, RefreshCw, Square, Volume2 } from "lucide-react";
+import { useContext } from "react";
+import { ConversationFilesContext } from "@/lib/conversation-files";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import type { ConfigStatus, Group, Message, useStore } from "@/state/store";
@@ -58,6 +60,7 @@ export function useBotMessageMenu({
   pin?: PinAction;
 }): MessageMenuItem[] {
   const speak = useSpeakAction({ text, botId, messageId, voiceId, tts, localVoice });
+  const workspace = useContext(ConversationFilesContext);
   const items: MessageMenuItem[] = [];
   if (canSpeak && text) {
     items.push({
@@ -70,6 +73,7 @@ export function useBotMessageMenu({
     });
   }
   if (text) {
+    if (workspace?.canWrite) items.push({ key: "workspace", icon: <FolderPlus {...ACTION_ICON} />, label: t("workspaceFiles.saveMarkdown"), onSelect: () => workspace.open({ name: "answer.md", content: text }) });
     items.push({
       key: "raw",
       icon: viewRaw ? <Eye {...ACTION_ICON} /> : <Code {...ACTION_ICON} />,
