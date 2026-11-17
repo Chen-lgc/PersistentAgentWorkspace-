@@ -68,7 +68,49 @@ const add = { displayName: "Zhipu", url: "https://open.bigmodel.cn/api/paas/v4/"
 describe("added OpenAI-compatible servers", () => {
   it("are admin-only", () => {
     expect(requiredScope("POST", "/api/instances/openai-compat")).toBe("admin");
+    expect(requiredScope("POST", "/api/instances/openai-compat/check")).toBe("admin");
     expect(requiredScope("DELETE", "/api/instances/openai-compat-1")).toBe("admin");
+  });
+
+  it("checks an unsaved endpoint without persisting or returning provider text or keys", async () => {
+    const { call, persisted, cfg } = await serve();
+    const key = "opaque-" + "x".repeat(600);
+    const seen: Array<{ path?: string; method?: string; authorization?: string }> = [];
+    let status = 200;
+    const provider = createServer((req, res) => {
+      seen.push({ path: req.url, method: req.method, authorization: req.headers.authorization });
+      res.writeHead(status, { "content-type": "application/json", ...(status === 302 ? { location: "https://other.example.test/models" } : {}) });
+      res.end(JSON.stringify(status === 200 ? { data: [{ id: key }] } : { error: { message: key } }));
+    });
+    servers.push(provider);
+    await new Promise<void>(resolve => provider.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(provider.address() as AddressInfo).port}/v1`;
+    const before = structuredClone(cfg);
+    for (const code of [200, 401, 403, 404, 405, 429, 500, 302]) {
+      status = code;
+      const result = await call("POST", "/api/instances/openai-compat/check", { url, key });
+      expect(result.status).toBe(200);
+      expect(result.body).toEqual(code === 200 ? { ok: true, check: "models" }
+        : { ok: false, reason: code === 401 || code === 403 ? "rejected" : "unexpected", status: code });
+      expect(result.text).not.toContain(key);
+    }
+    expect(seen).toHaveLength(8);
+    expect(seen.every(request => request.path === "/v1/models" && request.method === "GET" && request.authorization === `Bearer ${key}`)).toBe(true);
+    expect(persisted).toHaveLength(0);
+    expect(cfg).toEqual(before);
+  });
+
+  it("rejects malformed draft fields without using a saved key or default endpoint", async () => {
+    const { call, persisted } = await serve();
+    for (const body of [{}, { key: SECRET }, { url: add.url }, { url: "https://user:secret@example.test/v1", key: SECRET }, { url: add.url, key: "abc✓" }]) {
+      const result = await call("POST", "/api/instances/openai-compat/check", body);
+      expect(result.body.ok).toBe(false);
+      expect(result.body.reason).toMatch(/^invalid_/);
+      expect(result.text).not.toContain(SECRET);
+    }
+    expect(persisted).toHaveLength(0);
+    const hosted = await serve({ hosted: true });
+    expect((await hosted.call("POST", "/api/instances/openai-compat/check", { url: add.url, key: SECRET })).status).toBe(403);
   });
 
   it("saves a new instance with its own key, base URL and models, and never sends the key back", async () => {

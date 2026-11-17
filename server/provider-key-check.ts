@@ -1,4 +1,4 @@
-// OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access. Keys go only over TLS (or loopback).
+// OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access.
 import { isIP } from "node:net";
 
 export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
@@ -6,7 +6,7 @@ export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCom
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
-  | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
+  | { ok: false; reason: "rejected" | "unreachable" | "timeout" | "unexpected"; status?: number };
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
@@ -32,7 +32,7 @@ export function apiKeyFormatError(key: string): string | null {
     : null;
 }
 
-/** A URL hostname on this machine: the only place a key may go over plain http. */
+/** A URL hostname on this machine. */
 export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
   return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
@@ -62,7 +62,7 @@ function modelIds(body: unknown): string[] {
 }
 
 export async function checkProviderKey(
-  input: { provider: ProviderKeyKind; key: string; url?: string | null },
+  input: { provider: ProviderKeyKind; key: string; url?: string | null; allowRemoteHttp?: boolean },
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 10_000,
 ): Promise<ProviderKeyVerdict> {
@@ -73,7 +73,7 @@ export async function checkProviderKey(
   } catch {
     return { ok: false, reason: "unexpected" };
   }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) {
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && (isLoopback(url.hostname) || input.allowRemoteHttp === true))) {
     return { ok: false, reason: "unexpected" };
   }
   const authenticate = (input.provider === "openaiCompat" || input.provider === "openrouter")
@@ -91,6 +91,7 @@ export async function checkProviderKey(
     if (response.status === 401 || response.status === 403) return { ok: false, reason: "rejected", status: response.status };
     if (!response.ok) return { ok: false, reason: "unexpected", status: response.status };
     const body: unknown = await response.json().catch(() => null);
+    if (controller.signal.aborted) return { ok: false, reason: "timeout" };
     if (!body || typeof body !== "object") return { ok: false, reason: "unexpected", status: response.status };
     if (authenticate) {
       const data = (body as { data?: unknown }).data;
@@ -98,9 +99,12 @@ export async function checkProviderKey(
       if (typeof freeTier !== "boolean") return { ok: false, reason: "unexpected", status: response.status };
       return { ok: true, check: "authentication", models: [], freeTier };
     }
+    if (!Array.isArray(body) && !Array.isArray((body as { data?: unknown }).data) && !Array.isArray((body as { models?: unknown }).models)) {
+      return { ok: false, reason: "unexpected", status: response.status };
+    }
     return { ok: true, check: "models", models: modelIds(body) };
   } catch {
-    return { ok: false, reason: "unreachable" };
+    return { ok: false, reason: controller.signal.aborted ? "timeout" : "unreachable" };
   } finally {
     clearTimeout(timer);
   }

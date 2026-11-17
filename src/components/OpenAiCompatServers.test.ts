@@ -13,7 +13,7 @@ vi.mock("react", async (original) => {
       if (!fixture.counting) return react.useState(initial);
       const index = fixture.index++;
       if (!(index in fixture.values)) fixture.values[index] = initial;
-      return [fixture.values[index], (next: unknown) => { fixture.values[index] = next; }];
+      return [fixture.values[index], (next: unknown) => { fixture.values[index] = typeof next === "function" ? next(fixture.values[index]) : next; }];
     },
   };
 });
@@ -66,7 +66,7 @@ describe("other OpenAI-compatible servers", () => {
 
 describe("adding another OpenAI-compatible server", () => {
   const KEY = "sk-ZZtestSECRET0123456789";
-  type Props = { children?: ReactNode; servers?: unknown; onChange?: (event: { target: { value: string } }) => void; onClick?: () => void; "aria-label"?: string };
+  type Props = { children?: ReactNode; servers?: unknown; disabled?: boolean; role?: string; onChange?: (event: { target: { value: string } }) => void; onClick?: () => void; "aria-label"?: string };
   const nodes = (tree: ReactNode): Array<ReactElement<Props>> =>
     Children.toArray(tree).flatMap((child) => isValidElement<Props>(child) ? [child, ...nodes(child.props.children)] : []);
   const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -119,6 +119,75 @@ describe("adding another OpenAI-compatible server", () => {
     await flush();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fixture.api.mock.calls[0][1].body)).toEqual({ displayName: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" });
+  });
+
+  const button = (text: string) => form().find(node => node.type === "button" && JSON.stringify(node.props.children ?? "").includes(text))!;
+  const fill = (label: string, value: string) => form().find(node => node.props["aria-label"] === label)!.props.onChange!({ target: { value } });
+  const notices = () => form().filter(node => node.props.role === "status" || node.props.role === "alert").map(node => node.props.children).join(" ");
+
+  it.each([
+    [{ ok: true, check: "models" }, "model catalog is reachable"],
+    [{ ok: false, status: 401 }, "Authentication failed"],
+    [{ ok: false, status: 403 }, "refused access"],
+    [{ ok: false, status: 404 }, "does not provide this model catalog"],
+    [{ ok: false, status: 429 }, "rate limiting"],
+    [{ ok: false, reason: "timeout" }, "timed out"],
+  ])("checks draft fields independently of saving and explains %j", async (answer, message) => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockResolvedValueOnce(answer);
+    expect(button("Check connection").props.disabled).toBe(true);
+    fill("Base URL", " http://custom.example.test/v1 ");
+    fill("API key", KEY);
+    expect(button("Check connection").props.disabled).toBe(false);
+    button("Check connection").props.onClick!();
+    await flush();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat/check", {
+      method: "POST", body: JSON.stringify({ url: "http://custom.example.test/v1", key: KEY }), timeoutMs: 15_000,
+    });
+    expect(notices()).toContain(message);
+    fill("Display name", "Custom");
+    expect(button("Add server").props.disabled).toBe(false);
+    fixture.api.mockResolvedValueOnce({ instances: [] });
+    button("Add server").props.onClick!();
+    await flush();
+    expect(fixture.api.mock.calls[1][0]).toBe("/api/instances/openai-compat");
+    expect(notices()).toBe("");
+  });
+
+  it("discards checks for edited credentials, including late responses", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    let resolve!: (value: unknown) => void;
+    fixture.api.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    fill("Display name", "Custom");
+    fill("Base URL", "https://first.example.test/v1");
+    fill("API key", KEY);
+    button("Check connection").props.onClick!();
+    expect(notices()).toContain("Checking connection");
+    expect(button("Add server").props.disabled).toBe(false);
+    fill("Base URL", "https://second.example.test/v1");
+    expect(notices()).toBe("");
+    fixture.api.mockResolvedValueOnce({ ok: false, status: 401 });
+    button("Check connection").props.onClick!();
+    await flush();
+    resolve({ ok: true, check: "models" });
+    await flush();
+    expect(notices()).toContain("Authentication failed");
+    fill("API key", "replacement-key");
+    expect(notices()).toBe("");
+  });
+
+  it("does not display a transport exception that contains the draft key", async () => {
+    fixture.values = [];
+    fixture.api.mockReset();
+    fixture.api.mockRejectedValueOnce(new Error(`request failed: ${KEY}`));
+    fill("Base URL", "https://custom.example.test/v1");
+    fill("API key", KEY);
+    button("Check connection").props.onClick!();
+    await flush();
+    expect(notices()).toContain("Couldn't reach the provider");
+    expect(notices()).not.toContain(KEY);
   });
 });
 

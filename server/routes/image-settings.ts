@@ -42,7 +42,7 @@ export async function testImageProvider(cfg: ImageCredentials, provider: ImagePr
   const key = imageProviderKey(cfg, provider);
   if (!key) return { ok: false, reason: "no_key" };
   const verdict = await checkProviderKey({ ...target, key }, fetchImpl);
-  if (!verdict.ok) return verdict;
+  if (!verdict.ok) return { ...verdict, reason: verdict.reason === "timeout" ? "unreachable" : verdict.reason };
   if (provider === "openrouter") {
     const { primary, fallback } = imageSlots(cfg);
     for (const slot of [primary, fallback]) {

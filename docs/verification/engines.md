@@ -69,6 +69,18 @@ visible while engine status is unavailable and retains setup when there is
 no conversation. These checks do not prove a real provider's login or a
 packaged Windows window.
 
+## Custom server connection checks
+
+In an isolated fixture, open Settings → API keys → More servers. Enter a
+synthetic provider's base URL and key, then select **Check connection** before
+adding the server. This checks its catalog (or OpenRouter authentication), not
+model inference. It must neither save the draft nor change saved credentials.
+Verify success, 401, 403, missing catalog, rate limit, timeout and redirect
+responses. A failed check must leave **Add server** available; changing the URL
+or key must clear the result and discard a late response for the old draft.
+
+Run `pnpm exec vitest run server/routes/openai-compat-endpoints.test.ts server/provider-key-check.test.ts src/components/OpenAiCompatServers.test.ts src/components/keys/key-save.test.ts`.
+
 ## Groq API setup
 
 ```sh

@@ -23,6 +23,24 @@ export const GEMINI_PRESET = { name: "Google Gemini", url: "https://generativela
 const MODEL_ID_LIMITS = { count: 64, length: 200 } as const;
 const withinModelIdLimits = (ids: string[]) => ids.length <= MODEL_ID_LIMITS.count && ids.every((id) => id.length <= MODEL_ID_LIMITS.length);
 
+type ConnectionVerdict = { ok: boolean; check?: string; reason?: string; status?: number };
+type ConnectionCheck = { state: "checking" } | { state: "done"; verdict: ConnectionVerdict };
+
+function connectionText(result: ConnectionVerdict): string {
+  if (result.ok) return t(result.check === "authentication" ? "apiInstances.connectionAuthenticated" : "apiInstances.connectionOk");
+  if (result.reason === "invalid_url") return t("apiInstances.connectionInvalidUrl");
+  if (result.reason === "invalid_key") return t("apiInstances.connectionInvalidKey");
+  if (result.reason === "invalid_input") return t("apiInstances.connectionInvalidInput");
+  if (result.reason === "timeout") return t("keys.testTimeout");
+  if (result.reason === "unreachable") return t("keys.testUnreachable");
+  if (result.status === 401) return t("apiInstances.connectionUnauthorized");
+  if (result.status === 403) return t("apiInstances.connectionForbidden");
+  if (result.status === 404 || result.status === 405) return t("apiInstances.connectionNoCatalog");
+  if (result.status === 429) return t("apiInstances.connectionRateLimited");
+  if (result.status && result.status >= 300 && result.status < 400) return t("apiInstances.connectionRedirect");
+  return t("keys.testUnexpected", { status: String(result.status ?? "?") });
+}
+
 const saveSettings = (instanceId: string, settings: { replyWaitMinutes?: number | null; models?: string[] }): Promise<{ instances?: unknown }> =>
   api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify(settings) });
 
@@ -90,7 +108,23 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
   /** The server whose model IDs are open for editing, and the text being edited. */
   const [editing, setEditing] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
+  const [connection, setConnection] = useState<ConnectionCheck | null>(null);
   const ready = Boolean(name.trim() && url.trim() && key.trim());
+
+  const checkConnection = async () => {
+    if (busy || connection?.state === "checking" || !url.trim() || !key.trim()) return;
+    const pending: ConnectionCheck = { state: "checking" };
+    setConnection(pending);
+    let verdict: ConnectionVerdict;
+    try {
+      verdict = await api<ConnectionVerdict>("/api/instances/openai-compat/check", {
+        method: "POST", body: JSON.stringify({ url: url.trim(), key: key.trim() }), timeoutMs: 15_000,
+      });
+    } catch (error) {
+      verdict = { ok: false, reason: error instanceof Error && /^(TimeoutError|AbortError)$/.test(error.name) ? "timeout" : "unreachable" };
+    }
+    setConnection(current => current === pending ? { state: "done", verdict } : current);
+  };
 
   const run = (kind: "add" | "other", request: () => Promise<{ instances?: unknown }>, onDone?: () => void, at?: string) => {
     if (busy) return;
@@ -115,7 +149,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
       (added) => { keySaved("custom_endpoint", "settings", "unverified"); return added; },
       (cause: unknown) => { keySaved("custom_endpoint", "settings", "error"); throw cause; },
     ),
-    () => { setName(""); setUrl(""); setKey(""); setModels(""); },
+    () => { setName(""); setUrl(""); setKey(""); setModels(""); setConnection(null); },
   );
 
   return (
@@ -202,7 +236,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
       <div className="mt-2 flex flex-col gap-1.5">
         <button
           type="button"
-          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); }}
+          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); setConnection(null); }}
           disabled={busy !== null}
           className="ui-button self-start"
         >
@@ -211,22 +245,35 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
         {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
-        <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
+        <input type="url" value={url} onChange={(e) => { setUrl(e.target.value); setConnection(null); }} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
           spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
-        <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("apiInstances.key")} aria-label={t("apiInstances.key")}
+        <input type="password" value={key} onChange={(e) => { setKey(e.target.value); setConnection(null); }} placeholder={t("apiInstances.key")} aria-label={t("apiInstances.key")}
           autoComplete="off" disabled={busy !== null} className={cn(INPUT, "font-mono")} />
         <input value={models} onChange={(e) => setModels(e.target.value)} placeholder={t("apiInstances.models")} aria-label={t("apiInstances.models")}
           spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
         <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsHint")}</p>
-        <button
-          type="button"
-          onClick={add}
-          disabled={busy !== null || !ready}
-          className="ui-button self-start"
-        >
-          {busy === "add" ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
-          {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
-        </button>
+        <div className="flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={add}
+            disabled={busy !== null || !ready}
+            className="ui-button self-start"
+          >
+            {busy === "add" ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
+            {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
+          </button>
+          <button type="button" onClick={() => void checkConnection()}
+            disabled={busy !== null || connection?.state === "checking" || !url.trim() || !key.trim()} className="ui-button">
+            {connection?.state === "checking" && <Loader2 size={12} aria-hidden="true" className="animate-spin" />}
+            {t(connection?.state === "checking" ? "apiInstances.connectionChecking" : "apiInstances.connectionCheck")}
+          </button>
+        </div>
+        <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.connectionHint")}</p>
+        {connection?.state === "checking" && <p role="status" className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.connectionChecking")}</p>}
+        {connection?.state === "done" && <p role={connection.verdict.ok ? "status" : "alert"}
+          className={cn("text-[12px] leading-4", connection.verdict.ok ? "text-success" : "text-warning")}>
+          {connectionText(connection.verdict)}
+        </p>}
       </div>
       {error && !error.at && <div className="mt-1 text-[12px] text-danger">{error.text}</div>}
     </div>

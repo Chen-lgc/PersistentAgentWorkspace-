@@ -34,6 +34,19 @@ describe("loopback hosts for HTTP key checks", () => {
       .toEqual({ ok: true, check: "models", models: ["fixture-model"] });
     expect(calls).toBe(1);
   });
+
+  it("checks an explicitly allowed remote HTTP server without following redirects", async () => {
+    const requests: string[] = [];
+    const provider: typeof fetch = async (url, init) => {
+      requests.push(String(url));
+      expect(init?.redirect).toBe("manual");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer arbitrary-key");
+      return Response.json({ data: [] });
+    };
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "arbitrary-key", url: "http://custom.example.test/v1", allowRemoteHttp: true }, provider))
+      .toEqual({ ok: true, check: "models", models: [] });
+    expect(requests).toEqual(["http://custom.example.test/v1/models"]);
+  });
 });
 
 // A local stand-in for a provider's models endpoint; no real provider is contacted in this file.
@@ -48,6 +61,11 @@ describe("provider key check", () => {
       seen.push({ path: req.url ?? "", headers: req.headers });
       const key = req.headers["x-api-key"] ?? req.headers.authorization?.replace(/^Bearer /, "");
       if (req.url?.startsWith("/hang")) return;
+      if (req.url?.startsWith("/slow-body")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.write('{"data":');
+        return;
+      }
       if (req.url?.startsWith("/moved")) {
         res.writeHead(302, { location: "https://elsewhere.example.test/v1/models" });
         res.end();
@@ -226,9 +244,17 @@ describe("provider key check", () => {
   });
 
   it("gives up on a hanging provider and never follows a redirect with the key", async () => {
-    expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: `${base}/hang` }, fetch, 200)).toEqual({ ok: false, reason: "unreachable" });
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: `${base}/hang` }, fetch, 200)).toEqual({ ok: false, reason: "timeout" });
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: `${base}/slow-body` }, fetch, 200)).toEqual({ ok: false, reason: "timeout" });
     expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: `${base}/moved` })).toEqual({ ok: false, reason: "unexpected", status: 302 });
     expect(seen.filter((request) => request.path.startsWith("/moved"))).toHaveLength(1);
+  });
+
+  it("does not report a JSON error or unrelated JSON as a reachable model catalog", async () => {
+    for (const body of [{ error: { message: "private provider detail" } }, {}, { data: "not a model list" }]) {
+      expect(await checkProviderKey({ provider: "openaiCompat", key: "arbitrary-key", url: "https://custom.example.test/v1" }, async () => Response.json(body)))
+        .toEqual({ ok: false, reason: "unexpected", status: 200 });
+    }
   });
 
   it("refuses to send a key in clear to anything but a loopback test double", async () => {

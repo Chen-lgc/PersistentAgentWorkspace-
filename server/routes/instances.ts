@@ -29,6 +29,7 @@ import {
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, endpointBaseUrl, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { apiKeyFormatError, checkProviderKey } from "../provider-key-check.ts";
 import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
@@ -181,6 +182,18 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         await persistProviderInstance(instanceId, instances);
         return json(res, 201, { instanceId, instances: await describeInstances() });
       } finally { providerConfigBusy.set(false); }
+    }
+
+    if (method === "POST" && path === "/api/instances/openai-compat/check") {
+      res.setHeader("cache-control", "no-store");
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) return json(res, 415, { error: "content-type must be application/json" });
+      const parsed = addEndpointSchema.pick({ url: true, key: true }).safeParse(await readBody(req, 8192));
+      if (!parsed.success) return json(res, 200, { ok: false, reason: "invalid_input" });
+      const baseUrl = endpointBaseUrl(parsed.data.url);
+      if (!baseUrl) return json(res, 200, { ok: false, reason: "invalid_url" });
+      if (apiKeyFormatError(parsed.data.key) || /^https?:\/\//i.test(parsed.data.key)) return json(res, 200, { ok: false, reason: "invalid_key" });
+      const verdict = await checkProviderKey({ provider: "openaiCompat", url: baseUrl, key: parsed.data.key, allowRemoteHttp: true });
+      return json(res, 200, verdict.ok ? { ok: true, check: verdict.check } : verdict);
     }
 
     if (method === "POST" && path === "/api/instances/openai-compat") {

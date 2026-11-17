@@ -57,6 +57,7 @@ export async function checkKey(provider: TestableProvider): Promise<KeyCheck> {
   if (answer.check === "treg") return { result, ok: answer.ok === true, text: tregVerdict(answer) };
   if (!answer.ok) {
     const text = answer.reason === "rejected" ? t("keys.testRejected")
+      : answer.reason === "timeout" ? t("keys.testTimeout")
       : answer.reason === "unreachable" ? t("keys.testUnreachable")
         : t("keys.testUnexpected", { status: String(answer.status ?? "?") });
     return { result, ok: false, text };
