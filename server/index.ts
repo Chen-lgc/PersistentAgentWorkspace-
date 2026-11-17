@@ -69,10 +69,7 @@ import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, too
 import { appendDecision, bindDecisionRetention, decisionRetentionDays, flushDecisionLog, pruneDecisions, withDecisionActor, type DecisionActor, type DecisionVia } from "./decision-log.ts";
 import { folderToFollow, inMyFolderCwd, validateBotCwd } from "./bot-cwd.ts";
 import { ATTACHMENTS_DIR, attachmentExists, deleteAttachment, keptAttachmentNames, offerAttachmentClear, saveAudio, saveImage } from "./attachments.ts";
-import {
-  messageAttachmentName,
-  messageFileRoots,
-} from "./message-file.ts";
+import { attachmentNameInThread as storedAttachmentName, messageFileRootsForThread as storedMessageFileRoots } from "./host/message-file-context.ts";
 import { avatarImageStatus } from "./avatar-image.ts";
 import { imageGenerationReady } from "./image-generation.ts";
 import { createImageToolRoutes } from "./routes/image-tools.ts"; import { createMeetingsHost } from "./host/meetings-host.ts"; import { meetingsUnavailablePrompt } from "./meetings/prompt.ts";
@@ -11077,36 +11074,12 @@ function deliverCalendarCall(call: CalendarCall, scheduledFor: number): void {
 
 function resolveReplyTarget(threadId: string, value: unknown): Message | undefined { return replyTargetIn(store.messagesFor(threadId), value); }
 
-/** The name the person gave an attachment, from the newest of this thread's messages that carries its exact tag. */
 function attachmentNameInThread(threadId: string, path: string): string | null {
-  const messages = store.messagesFor(threadId);
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const text = messages[i]!.text;
-    const name = text ? messageAttachmentName(text, path) : null;
-    if (name) return name;
-  }
-  return null;
+  return storedAttachmentName(store, threadId, path);
 }
 
 function messageFileRootsForThread(senderId: string, threadId: string): string[] {
-  const directBot = store.botByThread(threadId);
-  const group = directBot ? undefined : store.groupByThread(threadId);
-  let pinnedCwd: string | null | undefined;
-  let configuredCwd: string | undefined;
-  if (directBot) {
-    pinnedCwd = store.taskByThread(directBot.id, threadId)?.cwd;
-    configuredCwd = directBot.cwd;
-  } else if (group) {
-    const task = store.groupTaskByThread(group.id, threadId);
-    pinnedCwd = task ? task.pinnedCwd : group.threadId === threadId ? group.pinnedCwd : undefined;
-    configuredCwd = group.cwd;
-  }
-  return messageFileRoots({
-    senderWorkspace: workspaceDir(senderId),
-    attachments: ATTACHMENTS_DIR,
-    pinnedCwd,
-    configuredCwd,
-  });
+  return storedMessageFileRoots(store, senderId, threadId);
 }
 
 async function attachmentVmForTurn(capability: InternalCapability): Promise<LocalVmTarget | undefined> {
