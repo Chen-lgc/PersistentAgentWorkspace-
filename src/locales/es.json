@@ -5354,7 +5354,6 @@
   "teamMemory.pin": "Fijar {name}",
   "teamMemory.unpin": "Dejar de fijar {name}",
   "apiInstances.title": "Más servidores",
-  "apiInstances.subtitle": "Añade otro servidor compatible con OpenAI con su propia URL base y clave de API. Todos los bots pueden elegirlo.",
   "apiInstances.name": "Nombre visible",
   "apiInstances.url": "URL base",
   "apiInstances.key": "Clave de API",

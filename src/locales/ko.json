@@ -6422,7 +6422,6 @@
   "teamMemory.add": "추가",
   "teamMemory.addEntry": "항목 추가",
   "apiInstances.title": "서버 더 보기",
-  "apiInstances.subtitle": "자체 기본 URL과 API 키가 있는 다른 OpenAI 호환 서버를 추가하세요. 모든 봇이 고를 수 있어요.",
   "apiInstances.name": "표시 이름",
   "apiInstances.url": "기본 URL",
   "apiInstances.key": "API 키",

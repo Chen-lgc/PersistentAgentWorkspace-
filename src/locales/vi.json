@@ -4728,7 +4728,6 @@
   "teamMemory.pin": "Ghim {name}",
   "teamMemory.unpin": "Bỏ ghim {name}",
   "apiInstances.title": "Máy chủ khác",
-  "apiInstances.subtitle": "Thêm một máy chủ tương thích với OpenAI khác với URL cơ sở và khóa API riêng. Mọi bot đều có thể chọn máy chủ này.",
   "apiInstances.name": "Tên hiển thị",
   "apiInstances.url": "URL cơ sở",
   "apiInstances.key": "Khóa API",

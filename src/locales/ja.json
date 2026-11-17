@@ -6672,7 +6672,6 @@
   "teamMemory.add": "追加",
   "teamMemory.addEntry": "項目を追加",
   "apiInstances.title": "その他のサーバー",
-  "apiInstances.subtitle": "独自のベースURLとAPIキーを持つ、別のOpenAI互換サーバーを追加します。すべてのボットが選択できます。",
   "apiInstances.name": "表示名",
   "apiInstances.url": "ベースURL",
   "apiInstances.key": "APIキー",

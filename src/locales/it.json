@@ -5767,7 +5767,6 @@
   "teamMemory.add": "Aggiungi",
   "teamMemory.addEntry": "Aggiungi una voce",
   "apiInstances.title": "Altri server",
-  "apiInstances.subtitle": "Aggiungi un altro server compatibile con OpenAI, con il suo URL di base e la sua chiave API. Ogni bot può sceglierlo.",
   "apiInstances.name": "Nome visualizzato",
   "apiInstances.url": "URL di base",
   "apiInstances.key": "Chiave API",

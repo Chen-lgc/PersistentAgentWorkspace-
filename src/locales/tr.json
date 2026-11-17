@@ -4728,7 +4728,6 @@
   "teamMemory.pin": "{name} notunu sabitle",
   "teamMemory.unpin": "{name} notunun sabitlemesini kaldır",
   "apiInstances.title": "Diğer sunucular",
-  "apiInstances.subtitle": "Kendi temel URL'si ve API anahtarı olan başka bir OpenAI uyumlu sunucu ekleyin. Her bot bunu seçebilir.",
   "apiInstances.name": "Görünen ad",
   "apiInstances.url": "Temel URL",
   "apiInstances.key": "API anahtarı",

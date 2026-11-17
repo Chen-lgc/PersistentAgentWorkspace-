@@ -9976,7 +9976,7 @@
   "botIdentity.ai.openImageSettings": "开启图片设定",
   "imageGen.key.xai": "Grok（xAI）API 金钥",
   "imageGen.key.openrouter": "OpenRouter API 金钥",
-  "agentEndpoints.responses": "不使用 OAuth，改以 API 金钥验证。闸道必须支援串流 Responses（/v1/responses），并包含工具呼叫；仅支援 Chat Completions 并不足够。自定义端点支持 HTTP 和 HTTPS。",
+  "agentEndpoints.responses": "不使用 OAuth，改用 API 密钥验证。网关必须支持流式 Responses（/v1/responses），包括工具调用。仅支持 Chat Completions 还不够。自定义端点支持 HTTP 和 HTTPS。",
   "agentEndpoints.messages": "不使用 OAuth，改以 API 金钥验证。闸道必须支援 Anthropic Messages（/v1/messages），并包含串流与工具呼叫。HTTP 会以未加密方式传送你的金钥；建议改用 HTTPS 或安全通道。",
   "agentEndpoints.codexTitle": "Codex direct API",
   "agentEndpoints.codexHint": "使用 API 金钥执行原生 Codex 代理：可连接 OpenAI，或支援 Responses API 的闸道。每个连线都有各自的金钥和 Codex 设定，费用由该 URL 背后的供应商计收。",

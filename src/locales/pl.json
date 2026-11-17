@@ -5930,7 +5930,6 @@
   "teamMemory.add": "Dodaj",
   "teamMemory.addEntry": "Dodaj pozycję",
   "apiInstances.title": "Więcej serwerów",
-  "apiInstances.subtitle": "Dodaj kolejny serwer zgodny z OpenAI, z własnym bazowym URL i kluczem API. Każdy bot może go wybrać.",
   "apiInstances.name": "Nazwa wyświetlana",
   "apiInstances.url": "Bazowy URL",
   "apiInstances.key": "Klucz API",

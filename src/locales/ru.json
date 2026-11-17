@@ -5983,7 +5983,6 @@
   "teamMemory.add": "Добавить",
   "teamMemory.addEntry": "Добавить запись",
   "apiInstances.title": "Дополнительные серверы",
-  "apiInstances.subtitle": "Добавьте ещё один сервер, совместимый с OpenAI, со своим базовым URL и API-ключом. Его может выбрать любой бот.",
   "apiInstances.name": "Отображаемое имя",
   "apiInstances.url": "Базовый URL",
   "apiInstances.key": "API-ключ",
