@@ -10,7 +10,7 @@ export const IMAGE_DEFAULT_MODELS: Record<ImageProvider, string> = {
 /** What Settings' Test learns about a provider; no image is made. */
 export type ImageProviderTest =
   | { ok: true; check: "authentication" | "models"; freeTier?: boolean }
-  | { ok: false; reason: "no_key" | "no_url" | "rejected" | "unreachable" | "unexpected"; status?: number }
+  | { ok: false; reason: "no_key" | "no_url" | "rejected" | "forbidden" | "unreachable" | "unexpected"; status?: number }
   | { ok: false; reason: "model_missing"; model: string };
 
 export interface ImageModelChoice {

@@ -1,12 +1,14 @@
 // OpenRouter's catalog is public, so /key proves the key there; elsewhere /models proves only catalog access.
 import { isIP } from "node:net";
+import { rejectsKey } from "./key-rejections.ts";
+import { createSecretScrubber } from "./redact.ts";
 
 export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta";
 
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
-  | { ok: false; reason: "rejected" | "unreachable" | "timeout" | "unexpected"; status?: number };
+  | { ok: false; reason: "rejected" | "forbidden" | "unreachable" | "timeout" | "unexpected"; status?: number };
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
@@ -88,8 +90,11 @@ export async function checkProviderKey(
   try {
     // Never follow a redirect: the key must not be replayed to whichever host the front door points at.
     const response = await fetchImpl(url, { headers, signal: controller.signal, redirect: "manual" });
-    if (response.status === 401 || response.status === 403) return { ok: false, reason: "rejected", status: response.status };
-    if (!response.ok) return { ok: false, reason: "unexpected", status: response.status };
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      if (controller.signal.aborted) return { ok: false, reason: "timeout" };
+      return { ok: false, reason: rejectsKey(response.status, detail) ? "rejected" : response.status === 403 ? "forbidden" : "unexpected", status: response.status };
+    }
     const body: unknown = await response.json().catch(() => null);
     if (controller.signal.aborted) return { ok: false, reason: "timeout" };
     if (!body || typeof body !== "object") return { ok: false, reason: "unexpected", status: response.status };
@@ -102,7 +107,8 @@ export async function checkProviderKey(
     if (!Array.isArray(body) && !Array.isArray((body as { data?: unknown }).data) && !Array.isArray((body as { models?: unknown }).models)) {
       return { ok: false, reason: "unexpected", status: response.status };
     }
-    return { ok: true, check: "models", models: modelIds(body) };
+    const scrub = createSecretScrubber([input.key]);
+    return { ok: true, check: "models", models: modelIds(body).map(scrub) };
   } catch {
     return { ok: false, reason: controller.signal.aborted ? "timeout" : "unreachable" };
   } finally {

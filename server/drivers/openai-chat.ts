@@ -9,7 +9,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { ASK_USER_TOOL, ASK_USER_TOOL_DEFINITION, askQuestionSummary, parseAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
-import { redactSecretsInText } from "../redact.ts";
+import { createSecretScrubber, redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, chatToolNotices, mountChatTools, refitChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { noteToolBudget } from "../tool-budgets.ts";
@@ -110,6 +110,16 @@ const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see 
 
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
+  const scrubProviderKey = createSecretScrubber([options.apiKey]);
+  const safeProviderText = (text: string) => scrubProviderKey(redactSecretsInText(scrubProviderKey(text)));
+  const safeProviderContent = options.apiKey.length > 1 ? safeProviderText : redactSecretsInText;
+  const safeProviderValue = <T>(value: T): T => JSON.parse(JSON.stringify(value, (_key, part) => typeof part === "string" ? safeProviderText(part) : part));
+  const safeProviderBody = (body: string): string => {
+    try { return JSON.stringify(safeProviderValue(JSON.parse(body))); }
+    catch { return safeProviderText(body); }
+  };
+  const safeCompletionError = (body: ProviderBody, label: string) =>
+    completionError(safeProviderValue({ error: body.error, base_resp: body.base_resp }), label);
   const listeners = new Set<RuntimeEventListener>();
   const active = new Map<string, {
     abort: AbortController;
@@ -208,8 +218,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         signal: activeSignal,
       });
       const failure = (status: number, body: string): Error => {
-        const plain = options.plainRefusal?.(status, body); if (plain) return new Error(plain);
-        const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
+        const safeBody = safeProviderBody(body);
+        const plain = options.plainRefusal?.(status, safeBody); if (plain) return new Error(safeProviderText(plain));
+        const message = `${options.httpErrorLabel} HTTP ${status}${body ? `: ${httpErrorDetail(safeBody)}` : ""}`;
         const pdfMessageIndexes = messages.flatMap((entry, index) => Array.isArray(entry.content) && entry.content.some((part) => part.type === "file") ? [index] : []);
         const hasPdfs = pdfMessageIndexes.length > 0;
         if (hasPdfs && route === "responses" && pdfResponses.has(model) && routeRefusal(route, status, body) === "responses-unavailable" && (status === 404 || status === 405)) return new UnsupportedPdfInputError(message);
@@ -219,7 +230,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload));
         if (hasPdfs && rejectsPdfInput(status, body, route === "responses" ? [] : pdfMessageIndexes)) return new UnsupportedPdfInputError(message, route !== "responses" && pdfNeedsResponses(body));
         if (rejectsToolsParameter(status, body)) return new UnsupportedChatToolsError(message);
-        const refusal = refusedToolCall(status, body);
+        const refusal = refusedToolCall(status, safeBody);
         if (refusal) return new RejectedToolCallError(message, refusal);
         if (messages.some((entry) => entry.reasoning_content !== undefined) && rejectsReasoningReplay(status, body)) {
           return new UnsupportedReasoningReplayError(message);
@@ -241,14 +252,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           activeSignal.throwIfAborted();
           const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
           onUsage({
-            model: typeof json.model === "string" && json.model.trim() ? json.model : model,
+            model: safeProviderContent(typeof json.model === "string" && json.model.trim() ? json.model : model),
             input: count(tokenUsage?.prompt_tokens),
             output: count(tokenUsage?.completion_tokens),
             cachedInput: count(tokenUsage?.prompt_tokens_details?.cached_tokens),
             costUsd: count(tokenUsage?.cost),
           });
         }
-        const bodyError = completionError(json, "completion error");
+        const bodyError = safeCompletionError(json, "completion error");
         if (bodyError) throw bodyError;
         const message = json.choices?.[0]?.message;
         if (!message || !object(message) || !["content", "reasoning_content", "reasoning", "reasoning_details", "tool_calls", "function_call"].some((key) => key in message)) {
@@ -302,7 +313,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (!atEof) malformedFrame = true;
           return false;
         }
-        const chunkError = completionError(chunk, "streaming completion error");
+        const chunkError = safeCompletionError(chunk, "streaming completion error");
         if (chunkError) throw chunkError;
         const choice = chunk.choices?.find((row) => row.index === undefined || row.index === 0);
         const delta = choice?.delta;
@@ -342,7 +353,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (!sawChoice) {
               let body: CompletionJson | undefined;
               try { body = JSON.parse(buffer) as CompletionJson; } catch { body = undefined; }
-              const bodyError = body ? completionError(body, "completion error") : null;
+              const bodyError = body ? safeCompletionError(body, "completion error") : null;
               if (bodyError) throw bodyError;
             }
             throw new ChatProtocolError("Stream ended before completion");
@@ -464,22 +475,23 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       else messages.unshift({ role: "system", content: PDF_HISTORY_ONLY_NOTE });
       emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `模型 ${model} 的当前接口不支持传入 PDF，本轮仅根据历史文字和当前问题回答。PDF 已保留在本会话中。` });
     };
-    const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
-    const secrets = [options.apiKey].filter(maskable);
+    const maskable = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+    const credentials = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
       const entries = object(integration);
       const specs = entries && "command" in entries ? [entries] : Object.values(entries ?? {}).map(object);
       for (const spec of specs) {
         for (const [key, value] of Object.entries(object(spec?.env) ?? {})) {
-          if (/key|token|password|secret|authorization/i.test(key) && maskable(value)) secrets.push(value);
+          if (/key|token|password|secret|authorization/i.test(key) && maskable(value)) credentials.push(value);
         }
       }
     }
-    const safeText = (text: string) => {
-      let safe = text;
-      for (const secret of secrets) if (secret) safe = safe.split(secret).join("[redacted]");
-      return redactSecretsInText(safe);
-    };
+    // A one-character local placeholder must not erase numbers in replies; error diagnostics still scrub it.
+    const secrets = credentials.filter(value => value.length > 1);
+    const scrubDiagnostics = createSecretScrubber(credentials);
+    const safeDiagnosticText = (text: string) => scrubDiagnostics(redactSecretsInText(scrubDiagnostics(text)));
+    const scrubSecrets = createSecretScrubber(secrets);
+    const safeText = (text: string) => scrubSecrets(redactSecretsInText(scrubSecrets(text)));
     const preview = (value: unknown) => toolDetailPreview(JSON.parse(JSON.stringify(value, (_key, part) =>
       typeof part === "string" ? safeText(part) : part)));
     const native = (dir: "out" | "in", msg: unknown) => appendNative(turn.threadId, {
@@ -587,7 +599,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             const delta = (text: string, streamKind: keyof typeof pending, flush = false) => {
               let combined = pending[streamKind] + text;
               // Mask whole matches before holding a suffix, or "abab" could split at its own repeated prefix.
-              for (const secret of secrets) if (secret) combined = combined.split(secret).join("[redacted]");
+              combined = scrubSecrets(combined);
               let hold = 0;
               // A configured credential can straddle chunks: hold any suffix that could be its prefix.
               if (!flush) for (const secret of secrets) {
@@ -825,7 +837,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (error instanceof ChatToolSessionError) fatal = error;
               result = { ok: false, text: abort.signal.aborted
                 ? "Tool interrupted; an operation already dispatched may have taken effect. Verify its state before retrying."
-                : safeText(asError(error).message).slice(0, 2_000) };
+                : safeDiagnosticText(asError(error).message).slice(0, 2_000) };
             }
             if (!started) emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id, title: call.function.name });
             const repeatNote = skipRepeatCount ? undefined : repeats?.noteAfter(call.function.name, call.function.arguments, result);
@@ -844,8 +856,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!ok) throw new ChatProtocolError(stoppedAfter(`${MAX_CHAT_ROUNDS} steps`));
       } catch (value) {
         stopReason = abort.signal.aborted ? "interrupted" : stopReason ?? "error";
-        failure = safeText(asError(value).message).slice(0, 2_000);
-        failureText = runtimeErrorText(value);
+        failure = safeDiagnosticText(asError(value).message).slice(0, 2_000);
+        const text = runtimeErrorText(value);
+        failureText = text ? JSON.parse(JSON.stringify(text, (_key, part) => typeof part === "string" ? safeDiagnosticText(part) : part)) : undefined;
       } finally {
         turnEntry.ending = true;
         approval.close();
@@ -876,7 +889,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               hasUsage,
               failure,
               toolCalls: seenCalls.size,
-              messages,
+              messages: JSON.parse(JSON.stringify(messages, (_key, part) => typeof part === "string" ? safeText(part) : part)),
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }
@@ -949,10 +962,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       },
     },
     generateText: async (prompt, { signal, onUsage, model: named } = {}) => {
-      const model = named ?? options.generateModel?.() ?? options.models().default;
-      const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
-      if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
-      return text.trim() ? text : reasoning;
+      try {
+        const model = named ?? options.generateModel?.() ?? options.models().default;
+        const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal, undefined, [], onUsage);
+        if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
+        return safeProviderContent(text.trim() ? text : reasoning);
+      } catch (value) {
+        const error = asError(value);
+        const safe = new Error(safeProviderText(error.message));
+        safe.name = safeProviderText(error.name);
+        throw safe;
+      }
     },
     dispose: async () => {
       const turns = [...active.values()];

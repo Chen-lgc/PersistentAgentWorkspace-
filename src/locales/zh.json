@@ -3666,6 +3666,7 @@
   "keys.testOk": "可用。模型包括 {models}。",
   "keys.testOkNoModels": "可用。",
   "keys.testRejected": "提供方拒绝了这把密钥。",
+  "keys.testForbidden": "服务器拒绝访问此接口（403）。这不一定表示 Key 无效，请检查接口权限。",
   "keys.testUnreachable": "无法连接提供方。请检查地址和网络连接，然后重新测试。",
   "keys.testTimeout": "连接检查超时，请稍后重试。",
   "keys.testUnexpected": "提供方返回了非预期的响应（状态 {status}）。",

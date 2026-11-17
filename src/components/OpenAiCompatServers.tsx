@@ -33,7 +33,8 @@ function connectionText(result: ConnectionVerdict): string {
   if (result.reason === "invalid_input") return t("apiInstances.connectionInvalidInput");
   if (result.reason === "timeout") return t("keys.testTimeout");
   if (result.reason === "unreachable") return t("keys.testUnreachable");
-  if (result.status === 401) return t("apiInstances.connectionUnauthorized");
+  if (result.status === 401 && result.reason !== "unexpected") return t("apiInstances.connectionUnauthorized");
+  if (result.reason === "rejected") return t("keys.testRejected");
   if (result.status === 403) return t("apiInstances.connectionForbidden");
   if (result.status === 404 || result.status === 405) return t("apiInstances.connectionNoCatalog");
   if (result.status === 429) return t("apiInstances.connectionRateLimited");

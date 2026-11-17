@@ -91,7 +91,7 @@ describe("added OpenAI-compatible servers", () => {
       const result = await call("POST", "/api/instances/openai-compat/check", { url, key });
       expect(result.status).toBe(200);
       expect(result.body).toEqual(code === 200 ? { ok: true, check: "models" }
-        : { ok: false, reason: code === 401 || code === 403 ? "rejected" : "unexpected", status: code });
+        : { ok: false, reason: code === 401 ? "rejected" : code === 403 ? "forbidden" : "unexpected", status: code });
       expect(result.text).not.toContain(key);
     }
     expect(seen).toHaveLength(8);

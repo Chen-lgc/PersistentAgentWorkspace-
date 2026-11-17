@@ -163,7 +163,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
       const url = typeof body?.url === "string" && body.url.trim() ? body.url.trim() : (saved && "url" in saved ? saved.url : undefined);
       res.setHeader("cache-control", "no-store");
-      const verdict = await checkProviderKey({ provider: kind, key, url });
+      const verdict = await checkProviderKey({ provider: kind, key, url, allowRemoteHttp: kind === "openaiCompat" && Boolean(url) });
       if (kind !== "anthropic") {
         const base = providerBaseUrl(kind, url);
         if (verdict.ok) noteKeyAccepted(base, key);

@@ -13,6 +13,15 @@ import { mask, redactSecretsInText } from "../shared/redact.ts";
 
 export { addHeldSecretScrubber, HELD_SECRET_MASK, mask, redactParams, redactSecretsInText, scrubHeldSecrets } from "../shared/redact.ts";
 
+/** Scrub known credentials before truncation, regardless of length or vendor format, without re-masking the marker. */
+export function createSecretScrubber(values: readonly string[]): (text: string) => string {
+  const secrets = [...new Set(values.filter(Boolean))].sort((a, b) => b.length - a.length);
+  if (!secrets.length) return text => text;
+  const pattern = new RegExp(secrets.map(secret => secret.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g");
+  const marker = secrets.some(secret => "[redacted]".includes(secret)) ? "••••••" : "[redacted]";
+  return text => text.replace(pattern, () => marker);
+}
+
 export function redactSecrets(input: unknown, depth = 0): unknown {
   if (typeof input === "string") return redactSecretsInText(input);
   if (depth > 12 || input === null || typeof input !== "object") return input;

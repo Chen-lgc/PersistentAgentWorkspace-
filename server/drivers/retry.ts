@@ -2,6 +2,7 @@
 // (429/5xx/overloaded/reset) gets up to MAX_ATTEMPTS tries, an auth or request-shape problem none.
 import type { ProviderErrorCode } from "../contracts.ts";
 import { isProviderSafetyBlock } from "../../shared/provider-safety.ts";
+import { rejectsModel } from "../key-rejections.ts";
 
 export const RETRY_MAX_ATTEMPTS = 3;
 
@@ -100,6 +101,7 @@ export function classifyError(err: FailureInput): ErrorClassification {
     }
     return { transient: false, reason: "terminal_exit" };
   }
+  if (rejectsModel(text)) return { transient: false, reason: "unknown_model" };
   for (const { pattern, reason } of TERMINAL_PATTERNS) {
     if (pattern.test(text)) return { transient: false, reason };
   }

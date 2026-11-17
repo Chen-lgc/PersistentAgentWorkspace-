@@ -4059,6 +4059,7 @@
   "keys.testOk": "Works. Models include {models}.",
   "keys.testOkNoModels": "Works.",
   "keys.testRejected": "The provider rejected this key.",
+  "keys.testForbidden": "The server refused access to this endpoint (403). This does not necessarily mean the key is invalid. Check the endpoint permissions.",
   "keys.testUnreachable": "Couldn't reach the provider. Check the address and your internet connection, then test again.",
   "keys.testTimeout": "The connection check timed out. Try again later.",
   "keys.testUnexpected": "The provider answered unexpectedly (status {status}).",

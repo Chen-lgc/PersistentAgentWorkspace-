@@ -1,6 +1,7 @@
 // A tiny real message through an engine the person just connected, so setup can say it works or what to fix.
 import type { ProviderInstance } from "./contracts.ts";
-import { engineFailureMessage } from "./drivers/engine-errors.ts";
+import { engineFailureMessage, httpStatusOf } from "./drivers/engine-errors.ts";
+import { rejectsKey, rejectsModel } from "./key-rejections.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { userError } from "./user-errors.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
@@ -9,11 +10,13 @@ export type EngineCheck = { ok: true } | ({ ok: false } & ServerErrorBody) | { o
 
 const PROMPT = "This is a connection check. Reply with the single word OK.";
 const TIMEOUT_MS = 90_000;
-const SIGNED_OUT = /not logged in|please run \/login|\blogin required\b|not signed in|sign in again|invalid api key|invalid_api_key|\b401\b|unauthori[sz]ed/i;
+const SIGNED_OUT = /not logged in|please run \/login|\blogin required\b|not signed in|sign in again|invalid api key|invalid_api_key|unauthori[sz]ed/i;
 
 /** What a failed check says: the provider's own refusal in plain words, a sign-in to make again, or its own short text. */
 export function engineCheckError(name: string, message: string): string {
-  if (SIGNED_OUT.test(message)) return `${name} isn't signed in on this computer anymore. Sign in again, then check again.`;
+  if (rejectsModel(message)) return `${name}: the model does not exist or this key cannot access it. Check the Model ID and model permissions. ${redactSecretsInText(message).slice(0, 300)}`;
+  const status = httpStatusOf(message);
+  if (status === null ? SIGNED_OUT.test(message) : rejectsKey(status, message)) return `${name} isn't signed in on this computer anymore. Sign in again, then check again.`;
   const plain = engineFailureMessage(name, message);
   if (plain) return plain;
   const said = redactSecretsInText(message.replace(/\s+/g, " ").trim()).slice(0, 300);
