@@ -183,7 +183,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     tools: ChatToolDefinition[] = [],
     onUsage?: TextGenerationOptions["onUsage"], variant?: string,
   ): Promise<Completion> => {
-    const transportError = providerTransportError(options.apiUrl);
+    const transportError = providerTransportError(options.apiUrl, options);
     if (transportError) throw new Error(transportError);
     const keyError = apiKeyFormatError(options.apiKey);
     if (keyError) throw new Error(keyError);
@@ -452,13 +452,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   };
 
   const sendTurn = async (turn: SendTurnInput) => {
-    const transportError = providerTransportError(options.apiUrl);
+    const transportError = providerTransportError(options.apiUrl, options);
     if (transportError) throw new Error(transportError);
     if (!options.apiKey) throw new Error(options.missingKeyError);
     const keyError = apiKeyFormatError(options.apiKey);
     if (keyError) throw new Error(keyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-    if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
+    if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl, options);
     const model = turn.model || options.models().default;
     const extractPdfs = Boolean(options.pdfText && turn.pdfs?.length);
     let pdfAttached = Boolean(!extractPdfs && options.pdfInput && turn.pdfs?.length && options.pdfSupport?.(model) !== false);
@@ -566,7 +566,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
-        const remoteHttp = options.computerUse && !imageTransportAllowed(options.apiUrl);
+        const remoteHttp = options.computerUse && !imageTransportAllowed(options.apiUrl, options);
         const toolIntegrations = remoteHttp
           ? { ...turn.integrations, localComputer: undefined, browser: undefined }
           : turn.integrations;
@@ -815,7 +815,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                   }
                   if (result.images?.length) {
                     try {
-                      assertImageTransport(options.apiUrl);
+                      assertImageTransport(options.apiUrl, options);
                       retainImages(result.images);
                     } catch (error) {
                       throw new ChatToolSessionError(asError(error).message);
@@ -908,7 +908,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     },
     ...(options.refreshModels ? { refreshModels: options.refreshModels } : {}),
     snapshot: async () => {
-      const transportError = providerTransportError(options.apiUrl);
+      const transportError = providerTransportError(options.apiUrl, options);
       if (transportError) return { state: "unavailable", reason: transportError };
       const down = await options.serverUnavailable?.();
       if (down) return { state: "unavailable", ...down };

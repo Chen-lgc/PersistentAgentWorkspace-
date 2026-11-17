@@ -86,6 +86,9 @@ describe("CodexDriver.decodeConfig", () => {
     expect(() => CodexDriver.decodeConfig({ managed: { url: "http://company.example/v1", models: ["m"] } }))
       .toThrow("Invalid Company Codex endpoint.");
   });
+  it.each(["http://gateway.example/v1", "http://192.168.1.2:8000/v1", "http://[fc00::1]/v1"])("allows a direct API endpoint over HTTP (%s)", url => {
+    expect(CodexDriver.decodeConfig({ endpoint: { url, models: ["m"] } })).toMatchObject({ endpoint: { url, models: ["m"] } });
+  });
 });
 
 describe("Codex native diagnostic sanitization", () => {

@@ -8,7 +8,6 @@ import { loginLabel, type LoginPlace } from "../shared/logins.ts";
 import { vaultNameKey } from "../shared/vault.ts";
 import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 import { REPLY_HABITS_PROMPT } from "./reply-habits.ts";
-import { PAPER_REPORT_PROMPT } from "./paper-report-prompt.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -92,7 +91,6 @@ export function buildSystemPrompt(
     { id: "reply-style", label: "Reply style", text: replyStylePrompt(opts?.replyStyle) },
     ...parts,
     { id: "reply-habits", label: "How to reply", text: REPLY_HABITS_PROMPT },
-    { id: "paper-report", label: "Paper research reports", text: PAPER_REPORT_PROMPT },
   ];
   const sections = ordered
     .filter((part) => part.text.length > 0)

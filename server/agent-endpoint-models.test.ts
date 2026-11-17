@@ -81,14 +81,12 @@ it("explains a gateway that drops the connection mid-catalog without exposing th
   expect(failure.message).not.toContain("fixture-secret");
   expect(failure.status).toBe(400);
 });
-it.each([true, false])("never sends the key to a plain-HTTP host off this computer (Codex=%s)", async codex => {
+it.each([true, false])("discovers a custom plain-HTTP gateway (Codex=%s)", async codex => {
   const entry = endpoint(codex, "http://gateway.example/v1");
-  const request = vi.fn<typeof fetch>();
-  const failure = await discoverAgentEndpointModels(entry, request).catch(error => error);
-  expect(request).not.toHaveBeenCalled();
-  expect(failure.message).toContain("only over HTTPS or from this computer");
-  expect(failure.message).toContain("type the model");
-  expect(failure.status).toBe(400);
+  const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [{ id: "model-a" }] }));
+  await discoverAgentEndpointModels(entry, request);
+  expect(request).toHaveBeenCalledWith("http://gateway.example/v1/models", expect.objectContaining({ redirect: "manual", headers: expect.objectContaining({ authorization: "Bearer fixture-secret" }) }));
+  expect(entry.config).toMatchObject(codex ? { endpoint: { models: ["model-a"] } } : { endpointModels: ["model-a"] });
 });
 it.each(["http://127.0.0.1:8317/v1", "http://[::1]:8317/v1"])("still reads a loopback catalog over plain HTTP (%s)", async url => {
   const entry = endpoint(false, url);

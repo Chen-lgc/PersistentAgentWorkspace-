@@ -104,7 +104,10 @@ Computer-enabled MCP transports accept frames up to 32 MiB for screenshots;
 ordinary text-only transports retain their 2 MiB limit. Each image is bounded to
 20 MiB, with 32 MiB of encoded images retained across the whole turn, including
 user attachments. Exceeding the turn budget stops without replaying an operation.
-Remote image/computer connections require HTTPS; local loopback HTTP is allowed.
+Custom OpenAI-compatible model servers accept HTTP and HTTPS for model
+discovery, text, PDF and image/computer requests. Other provider transports
+retain their existing HTTPS/loopback rules. Credential-bearing requests
+still refuse redirects.
 Image-bearing completion requests do not follow redirects. Custom text MCP
 servers retain their 2 MiB transport cap even in computer-enabled sessions.
 PNG, JPEG, WebP and GIF are accepted; invalid base64/MIME results fail

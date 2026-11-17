@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import type { SendTurnInput } from "../contracts.ts";
+import { providerTransportError } from "../provider-key-check.ts";
 
 export interface ChatImagePart { type: "image_url"; image_url: { url: string } }
 export interface ChatTextPart { type: "text"; text: string }
@@ -20,14 +21,12 @@ export function chatImageBudget() {
   };
 }
 
-export function imageTransportAllowed(url: string): boolean {
-  const endpoint = new URL(url);
-  const loopback = endpoint.hostname === "localhost" || endpoint.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(endpoint.hostname);
-  return endpoint.protocol === "https:" || (endpoint.protocol === "http:" && loopback);
+export function imageTransportAllowed(url: string, options: { allowRemoteHttp?: boolean } = {}): boolean {
+  return providerTransportError(url, options) === null;
 }
 
-export function assertImageTransport(url: string) {
-  if (!imageTransportAllowed(url)) {
+export function assertImageTransport(url: string, options: { allowRemoteHttp?: boolean } = {}) {
+  if (!imageTransportAllowed(url, options)) {
     throw new Error("Images and computer tools require HTTPS for remote API endpoints; HTTP is supported only on loopback.");
   }
 }

@@ -19,34 +19,42 @@ afterEach(() => vi.unstubAllGlobals());
 
 const sse = (body: string) => new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
 
-it("refuses a remote HTTP endpoint before sending a key, text or tools", async () => {
+it("uses a custom HTTP server for text, images and helper generation without following redirects", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string | URL, init?: RequestInit) => {
-    requests.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
-    return sse('data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+    expect(["manual", "error"]).toContain(init?.redirect);
+    expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-key");
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    requests.push({ url: String(url), body });
+    return body.stream
+      ? sse('data: {"choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+      : Response.json({ choices: [{ message: { content: "Helper reply" }, finish_reason: "stop" }] });
   }));
+  const dir = mkdtempSync(join(tmpdir(), "qbot-http-image-"));
+  const picture = join(dir, "fixture.png");
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf2QAAAAASUVORK5CYII=", "base64");
+  writeFileSync(picture, png);
   const instance = await OpenAICompatDriver.create({
     instanceId: "remote-http", displayName: "Remote HTTP", enabled: true,
     config: OpenAICompatDriver.decodeConfig({ url: "http://remote.example.test/v1", key: "fixture-key", managedModels: ["fixture-model"] }),
     environment: {},
   });
+  const events: RuntimeEvent[] = [];
+  instance.adapter.onEvent(event => events.push(event));
   try {
-    await expect(instance.adapter.sendTurn({
-      threadId: "text", text: "hi", model: "fixture-model",
-      integrations: {
-        localComputer: { command: "unused-computer", args: [], env: {} },
-        browser: { command: "unused-browser", args: [], env: {} },
-      },
-    })).rejects.toThrow("require HTTPS");
-    expect(requests).toHaveLength(0);
-
-    await expect(instance.adapter.sendTurn({
-      threadId: "image", text: "inspect", model: "fixture-model",
-      images: [{ path: "unused.png", mime: "image/png", bytes: 1 }],
-    })).rejects.toThrow("require HTTPS");
-    expect(requests).toHaveLength(0);
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
+    await instance.adapter.sendTurn({ threadId: "text", text: "hi", model: "fixture-model" });
+    await vi.waitFor(() => expect(events.filter(event => event.type === "turn.completed")).toHaveLength(1));
+    await instance.adapter.sendTurn({ threadId: "image", text: "inspect", model: "fixture-model",
+      images: [{ path: picture, mime: "image/png", bytes: png.length }] });
+    await vi.waitFor(() => expect(events.filter(event => event.type === "turn.completed")).toHaveLength(2));
+    await expect(instance.generateText!("helper")).resolves.toBe("Helper reply");
+    expect(requests).toHaveLength(3);
+    expect(requests.every(request => request.url === "http://remote.example.test/v1/chat/completions")).toBe(true);
+    expect(JSON.stringify(requests[1].body)).toContain("data:image/png;base64,");
   } finally {
     await instance.dispose();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

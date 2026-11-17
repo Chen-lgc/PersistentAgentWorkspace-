@@ -24,7 +24,11 @@ describe("Codex direct API endpoints", () => {
     expect(() => updateCodexEndpoint({ instances: { codex: { driver: "codex" } } } as never, "codex", { model: "m" })).toThrow();
   });
 
-  it.each(["http://gateway.example/v1", "https://user:password@gateway.example/v1", "https://gateway.example/v1?key=secret", "file:///tmp/socket"])("rejects unsafe URLs (%s)", baseUrl => {
+  it.each(["http://gateway.example/v1", "http://192.168.1.2:8000/v1", "http://[fc00::1]/v1"])("accepts custom HTTP servers (%s)", baseUrl => {
+    expect(codexEndpointSchema.safeParse({ ...fields, baseUrl }).success).toBe(true);
+  });
+
+  it.each(["https://user:password@gateway.example/v1", "https://gateway.example/v1?key=secret", "file:///tmp/socket"])("rejects unsafe URLs (%s)", baseUrl => {
     expect(codexEndpointSchema.safeParse({ ...fields, baseUrl }).success).toBe(false);
   });
 });

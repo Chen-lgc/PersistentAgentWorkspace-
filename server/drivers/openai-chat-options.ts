@@ -13,6 +13,7 @@ export interface RuntimeOptions<Config> {
   driverKind: string;
   apiKey: string;
   apiUrl: string;
+  allowRemoteHttp?: boolean;
   /** An in-process transport for local workers that expose no network listener. */
   transport?: (url: string, init: RequestInit) => Promise<Response>;
   models: () => ModelCatalog;

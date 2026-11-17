@@ -92,7 +92,7 @@ function decodeConfig(raw: unknown): CodexConfig {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
     ...(o.authMode === "chatgpt-plan" ? { authMode: "chatgpt-plan" as const } : {}),
-    ...(o.endpoint ? { endpoint: decodeRoutedCodexConfig(o.endpoint as object, "Direct API") } : {}),
+    ...(o.endpoint ? { endpoint: decodeRoutedCodexConfig(o.endpoint as object, "Direct API", { allowRemoteHttp: true }) } : {}),
     ...(o.managed && typeof o.managed === "object" ? { managed: decodeRoutedCodexConfig(o.managed) } : {}),
   };
 }

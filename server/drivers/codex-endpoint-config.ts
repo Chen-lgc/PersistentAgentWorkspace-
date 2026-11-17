@@ -1,18 +1,18 @@
+import { providerTransportError } from "../provider-key-check.ts";
+
 /** A Responses endpoint used by an isolated Codex instance. */
 export interface CodexEndpointConfig {
   url: string;
   models: string[];
 }
 
-export function decodeRoutedCodexConfig(raw: object, label = "Company"): CodexEndpointConfig {
+export function decodeRoutedCodexConfig(raw: object, label = "Company", transport: { allowRemoteHttp?: boolean } = {}): CodexEndpointConfig {
   const value = raw as { url?: unknown; models?: unknown };
   if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length || value.models.some(model => typeof model !== "string" || !/^[\w][\w./+-]*$/.test(model))) {
     throw new Error(`Invalid ${label} Codex configuration.`);
   }
   const url = new URL(value.url);
-  // Plain HTTP leaks the API key; allow it only on loopback.
-  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
-  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) throw new Error(`Invalid ${label} Codex endpoint.`);
+  if (url.search || url.hash || providerTransportError(url.href, transport)) throw new Error(`Invalid ${label} Codex endpoint.`);
   return { url: url.href.replace(/\/$/, ""), models: value.models as string[] };
 }
 
@@ -38,4 +38,3 @@ function providerCodexArgs(url: string, provider: string, name: string, key: str
     "-c", "shell_environment_policy.ignore_default_excludes=false",
   ];
 }
-

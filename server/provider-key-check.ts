@@ -40,12 +40,13 @@ export function isLoopback(hostname: string): boolean {
   return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
-/** Credentials may travel only over HTTPS or HTTP to this machine; redirects must also be disabled by callers. */
-export function providerTransportError(address: string): string | null {
+/** Custom model servers may opt into HTTP; callers must still disable credential-bearing redirects. */
+export function providerTransportError(address: string, options: { allowRemoteHttp?: boolean } = {}): string | null {
   try {
     const url = new URL(address);
-    if (!url.username && !url.password && (url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname)))) return null;
+    if (!url.username && !url.password && (url.protocol === "https:" || (url.protocol === "http:" && (options.allowRemoteHttp || isLoopback(url.hostname))))) return null;
   } catch {}
+  if (options.allowRemoteHttp) return "Enter an HTTP or HTTPS model server URL without a user name or password.";
   return "API keys require HTTPS for remote servers. HTTP is allowed only on localhost/loopback. Use HTTPS or a secure tunnel to localhost.";
 }
 
@@ -84,7 +85,7 @@ export async function checkProviderKey(
   } catch {
     return { ok: false, reason: "unexpected" };
   }
-  if (providerTransportError(url.href)) {
+  if (providerTransportError(url.href, { allowRemoteHttp: input.provider === "openaiCompat" })) {
     return { ok: false, reason: "insecure_transport" };
   }
   const authenticate = (input.provider === "openaiCompat" || input.provider === "openrouter")

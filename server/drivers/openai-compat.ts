@@ -200,7 +200,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       (ownKeyVariable ? undefined : operatorEnvKey(DEFAULT_KEY_ENV)) ??
       "";
     // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
-    const transportError = providerTransportError(config.url);
+    const transportError = providerTransportError(config.url, { allowRemoteHttp: true });
     const ollamaCandidate = !transportError && (config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels))));
     // Another server on this network is only asked for Ollama's model list once it has answered Ollama's version route.
     const answersAsOllama = () => isOllamaServer(config) || isOllama(ollamaOrigin(config.url));
@@ -376,6 +376,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       ...(servedModel ? { servedModel } : {}),
       apiKey,
       apiUrl: config.url,
+      allowRemoteHttp: true,
       tools: config.tools,
       computerUse: true,
       pdfInput: true,

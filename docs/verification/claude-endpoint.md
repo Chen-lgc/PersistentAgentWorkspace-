@@ -26,8 +26,9 @@ Claude card.
    (placeholder `https://api.anthropic.com`), API key and an optional model.
    There is no provider selector. Save stays disabled until name, URL and
    (for a new endpoint) token are filled. A rejected save shows an alert and
-   leaves the fields editable. A plain-HTTP host off this computer with no
-   model is refused without sending the key; typing the model saves it.
+   leaves the fields editable. Custom endpoints accept HTTP and HTTPS,
+   including remote hosts, with or without a model supplied. Model discovery
+   never forwards credentials through redirects.
 2. Enter a synthetic gateway URL with an authenticated `/v1/models` catalog
    offering `deepseek-chat` and `deepseek-reasoner`. Save its name, base URL
    and fake token. A row appears with its address and **Edit** and **Remove**

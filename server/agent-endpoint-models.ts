@@ -2,7 +2,7 @@ import type { InstanceConfig } from "./contracts.ts";
 import { CLAUDE_MODEL_ID } from "./drivers/claude-model-extras.ts";
 import { STATIC_CODEX_MODELS } from "./drivers/codex-catalog.ts";
 import { currentEngineCatalog } from "./model-manifest/manifest.ts";
-import { isLoopback, providerModelsUrl } from "./provider-key-check.ts";
+import { isLoopback, providerModelsUrl, providerTransportError } from "./provider-key-check.ts";
 
 const OFFICIAL_URL = { codex: "https://api.openai.com/v1", claude: "https://api.anthropic.com" } as const;
 const MAX_CATALOG_BYTES = 2 * 1024 * 1024;
@@ -58,11 +58,8 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   const headers = codex ? { authorization: `Bearer ${token}` } : { authorization: `Bearer ${token}`, "x-api-key": token!, "anthropic-version": "2023-06-01" };
   const modelsUrl = providerModelsUrl(codex ? "openai" : "anthropic", agentEndpointAddress(entry));
   const failure = (detail: string) => Object.assign(new Error(`Could not discover gateway models: ${detail}`), { status: 400 });
-  // Same rule as checkProviderKey: the key goes out only over HTTPS, or over plain HTTP to this computer.
-  const target = new URL(modelsUrl);
-  if (target.protocol !== "https:" && !(target.protocol === "http:" && isLoopback(target.hostname))) {
-    throw failure(`OpenMausBot reads a model list only over HTTPS or from this computer, so your key is not sent in the clear.${TYPE_MODEL}`);
-  }
+  const transportError = providerTransportError(modelsUrl, { allowRemoteHttp: true });
+  if (transportError) throw failure(transportError);
   let response: Response;
   try {
     // A redirect must never replay the credential to another address.
