@@ -2,9 +2,59 @@
 import { describe, expect, it } from "vitest";
 
 import { holdsCredential } from "../shared/redact.ts";
-import { redactSecrets } from "./redact.ts";
+import { createSecretScrubber, redactSecrets } from "./redact.ts";
 
 const flat = (value: unknown) => JSON.stringify(value);
+
+describe("known API credentials", () => {
+  it.each(["a", "ok", "123"])("preserves prose, code and longer tokens with short key %s", key => {
+    const scrub = createSecretScrubber([key]);
+    const text = 'A cat has a token, 123 samples and 12345 rows; all looks ok. const token = data[123];';
+    expect(scrub(text)).toBe(text);
+    expect(scrub.value({ text, args: JSON.stringify({ value: "token", count: 123 }) })).toEqual({ text, args: JSON.stringify({ value: "token", count: 123 }) });
+    expect(scrub(`Authorization: Bearer ${key}`)).not.toContain(`Bearer ${key}`);
+    expect(scrub(`API Key: ${key}`)).not.toContain(`Key: ${key}`);
+    const log = scrub.value({ api_key: key, headers: { authorization: `Bearer ${key}` }, arguments: JSON.stringify({ apiKey: key, value: key, text }) });
+    expect(log.api_key).not.toBe(key);
+    expect(log.headers.authorization).not.toContain(`Bearer ${key}`);
+    expect(JSON.parse(log.arguments)).toMatchObject({ text });
+    expect(JSON.parse(log.arguments).value).not.toBe(key);
+    expect(scrub.containsCredential({ text, status: "ok", value: 123 })).toBe(false);
+    expect(scrub.containsCredential({ apiKey: key })).toBe(true);
+    expect(scrub.containsCredential({ header: `Authorization: Bearer ${key}` })).toBe(true);
+    const diagnostic = createSecretScrubber([key], "token");
+    expect(diagnostic(`Rejected credential: ${key}; token`)).not.toContain(`credential: ${key};`);
+    expect(diagnostic("token12345")).toBe("token12345");
+  });
+
+  it.each(["a", "ok", "123", "long-fixture-key-123456", "abababab", "a.+[b]$"])("masks credential echoes across every stream boundary: %s", key => {
+    const scrub = createSecretScrubber([key]);
+    const input = `${"ordinary words ".repeat(30)}API Key: ${key}; ${"more ordinary words ".repeat(30)}`;
+    const expected = scrub(input);
+    for (let split = 0; split <= input.length; split++) {
+      const stream = scrub.stream();
+      expect(stream.push(input.slice(0, split)) + stream.push(input.slice(split)) + stream.push("", true), `split ${split}`).toBe(expected);
+    }
+    const stream = scrub.stream();
+    expect([...input].map(char => stream.push(char)).join("") + stream.push("", true)).toBe(expected);
+  });
+
+  it("preserves ordinary words split inside a short key and does not re-mask markers", () => {
+    const scrub = createSecretScrubber(["ok", "redacted"]);
+    const stream = scrub.stream();
+    expect(stream.push("to") + stream.push("ken") + stream.push("", true)).toBe("token");
+    const once = scrub("API key: ok; redacted");
+    expect(scrub(once)).toBe(once);
+  });
+
+  it("keeps a short word after a long whitespace gap consistent with the final answer", () => {
+    const scrub = createSecretScrubber(["ok"]);
+    for (const input of [`ordinary text${" ".repeat(600)}ok`, `${" ".repeat(600)}ok`]) {
+      const stream = scrub.stream();
+      expect([...input].map(char => stream.push(char)).join("") + stream.push("", true)).toBe(scrub(input));
+    }
+  });
+});
 
 describe("redactSecrets", () => {
   it("omits private MCP descriptors even when a credential uses an ordinary header name", () => {

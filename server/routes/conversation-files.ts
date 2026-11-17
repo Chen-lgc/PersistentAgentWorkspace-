@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { ConversationFileError, type ConversationFiles } from "../conversation-files.ts";
+import type { ConversationUploads } from "../conversation-uploads.ts";
 import type { json as sendJson } from "../harness/http.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -20,6 +21,7 @@ function failure(error: unknown, res: ServerResponse, json: typeof sendJson): vo
 
 export function createConversationFileRoutes(deps: {
   files: ConversationFiles;
+  uploads: ConversationUploads;
   visible(auth: RequestAuth, threadId: string): boolean;
   writeRefusal(auth: RequestAuth, threadId: string): string | null;
 }): RouteHandler {
@@ -35,8 +37,29 @@ export function createConversationFileRoutes(deps: {
     }
     try {
       if (method === "GET") {
+        const upload = url.searchParams.get("upload");
+        if (upload !== null) {
+          if (url.searchParams.get("download") !== "1") {
+            const file = await deps.uploads.read(threadId, upload);
+            if (!deps.visible(auth, threadId)) return json(res, 404, { error: "Conversation not found." });
+            return json(res, 200, file);
+          }
+          const { file, handle } = await deps.uploads.openFile(threadId, upload);
+          if (!deps.visible(auth, threadId)) { await handle.close(); return json(res, 404, { error: "Conversation not found." }); }
+          res.writeHead(200, {
+            "content-type": "application/octet-stream", "content-length": file.bytes,
+            "content-disposition": messageFileDisposition(file.name),
+            "content-security-policy": "sandbox", "x-content-type-options": "nosniff",
+          });
+          if (!file.bytes) { await handle.close(); res.end(); return; }
+          const stream = handle.createReadStream({ start: 0, end: file.bytes - 1, autoClose: true });
+          stream.on("error", () => res.destroy());
+          res.on("close", () => stream.destroy());
+          stream.pipe(res);
+          return;
+        }
         const name = url.searchParams.get("name");
-        if (name === null) return json(res, 200, { files: deps.files.list(threadId) });
+        if (name === null) return json(res, 200, { files: deps.files.list(threadId), uploads: deps.uploads.list(threadId) });
         const file = deps.files.read(threadId, name);
         if (url.searchParams.get("download") !== "1") return json(res, 200, file);
         res.writeHead(200, {
@@ -62,12 +85,14 @@ export async function conversationFilesInternal(files: ConversationFiles, ctx: {
   method: string; path: string; res: ServerResponse; json: typeof sendJson;
   threadId: string; readBody(): Promise<unknown>;
   saved?(name: string): void;
+  uploads?: ConversationUploads;
 }): Promise<typeof PASS | void> {
   if (ctx.method !== "POST" || ctx.path !== "/api/internal/workspace-files") return PASS;
   try {
     const body = record(await ctx.readBody());
-    if (body.action === "list") return ctx.json(ctx.res, 200, { files: files.list(ctx.threadId) });
-    if (body.action === "read") return ctx.json(ctx.res, 200, files.read(ctx.threadId, body.name));
+    if (body.action === "list") return ctx.json(ctx.res, 200, { files: files.list(ctx.threadId), uploads: ctx.uploads?.list(ctx.threadId) ?? [] });
+    if (body.action === "read") return ctx.json(ctx.res, 200, typeof body.name === "string" && body.name.startsWith("upload:") && ctx.uploads
+      ? await ctx.uploads.read(ctx.threadId, body.name.slice(7)) : files.read(ctx.threadId, body.name));
     if (body.action === "write") {
       const { content: _content, ...file } = files.write(ctx.threadId, body);
       ctx.saved?.(file.name);

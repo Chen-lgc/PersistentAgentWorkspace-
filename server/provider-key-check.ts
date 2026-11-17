@@ -8,7 +8,7 @@ export type ProviderKeyKind = "anthropic" | "openai" | "openrouter" | "openaiCom
 export type ProviderKeyVerdict =
   /** `freeTier`: OpenRouter's /key says the account never bought credit, so paid models refuse it. */
   | { ok: true; check: "authentication" | "models"; models: string[]; freeTier?: boolean }
-  | { ok: false; reason: "rejected" | "forbidden" | "unreachable" | "timeout" | "unexpected"; status?: number };
+  | { ok: false; reason: "rejected" | "forbidden" | "unreachable" | "timeout" | "unexpected" | "insecure_transport"; status?: number };
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"];
 
@@ -40,6 +40,15 @@ export function isLoopback(hostname: string): boolean {
   return host === "localhost" || host === "::1" || (isIP(host) === 4 && host.startsWith("127."));
 }
 
+/** Credentials may travel only over HTTPS or HTTP to this machine; redirects must also be disabled by callers. */
+export function providerTransportError(address: string): string | null {
+  try {
+    const url = new URL(address);
+    if (!url.username && !url.password && (url.protocol === "https:" || (url.protocol === "http:" && isLoopback(url.hostname)))) return null;
+  } catch {}
+  return "API keys require HTTPS for remote servers. HTTP is allowed only on localhost/loopback. Use HTTPS or a secure tunnel to localhost.";
+}
+
 export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {
   return (base?.trim() || DEFAULT_URLS[provider]).replace(/\/+$/, "");
 }
@@ -64,7 +73,7 @@ function modelIds(body: unknown): string[] {
 }
 
 export async function checkProviderKey(
-  input: { provider: ProviderKeyKind; key: string; url?: string | null; allowRemoteHttp?: boolean },
+  input: { provider: ProviderKeyKind; key: string; url?: string | null },
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 10_000,
 ): Promise<ProviderKeyVerdict> {
@@ -75,8 +84,8 @@ export async function checkProviderKey(
   } catch {
     return { ok: false, reason: "unexpected" };
   }
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && (isLoopback(url.hostname) || input.allowRemoteHttp === true))) {
-    return { ok: false, reason: "unexpected" };
+  if (providerTransportError(url.href)) {
+    return { ok: false, reason: "insecure_transport" };
   }
   const authenticate = (input.provider === "openaiCompat" || input.provider === "openrouter")
     && url.origin === "https://openrouter.ai" && url.pathname === "/api/v1/models";

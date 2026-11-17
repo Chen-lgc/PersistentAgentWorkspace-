@@ -21,6 +21,40 @@ pnpm control:omb models --url http://127.0.0.1:PORT
 `doctor.ok` is true only when the endpoint is OpenMausBot and at least one
 engine is available. The isolated fixture should expose `claude`.
 
+## API credential transport and redaction
+
+```sh
+pnpm exec vitest run server/provider-key-check.test.ts server/provider-key-flow.test.ts server/drivers/api-key-security.test.ts server/drivers/openai-chat.test.ts server/redact.test.ts
+```
+
+Remote model endpoints require HTTPS. HTTP is allowed only on loopback
+(localhost, 127.0.0.0/8, ::1); private network addresses are not an exception.
+Use HTTPS or an authenticated secure tunnel to loopback for a private service.
+Configuration may still be saved independently of connectivity, but an unsafe
+address cannot receive the key through checks, catalog discovery or chat
+inference. Authenticated checks, catalogs, inference and liveness requests do
+not follow redirects. Existing remote HTTP configurations must migrate before
+their next call can succeed.
+
+Known keys of eight or more characters are masked by value. Short keys can
+also be ordinary words or numbers: normal content uses credential labels and
+whole values, while error diagnostics additionally mask standalone tokens.
+Structured log and tool-preview copies mask credential fields and parse JSON
+tool arguments. Calls that contain the provider's credential (a long known key
+or a short key in a credential context/field) are refused before tool execution;
+ordinary execution arguments are not rewritten. Ordinary words
+containing a short key (for example, `token` when the key is `ok`) stay intact.
+This is not a claim that every occurrence of a short string in prose is a
+credential. Streaming holds enough context to mask known credentials split
+across chunks before any matching text is shown.
+
+The key-flow test launches an isolated application fixture. Other tests use
+disposable homes and synthetic providers/tools, including a real loopback
+redirect server. They check HTTP rejection before fetch, loopback and HTTPS
+allowance, redirects, short-key prose, character-by-character streams, tool
+previews/results, native logs, and provider error echoes. No real credentials
+or provider accounts are used.
+
 ## Named Claude accounts
 
 Run the offline API fixture and driver regressions:

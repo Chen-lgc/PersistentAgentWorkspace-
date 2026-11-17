@@ -2,7 +2,7 @@
 // other endpoints that speak the OpenAI chat-completions contract.
 import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
 import { operatorEnvKey } from "../credential-env.ts";
-import { apiKeyFormatError, isLoopback } from "../provider-key-check.ts";
+import { apiKeyFormatError, isLoopback, providerTransportError } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
 import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
 import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
@@ -200,7 +200,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       (ownKeyVariable ? undefined : operatorEnvKey(DEFAULT_KEY_ENV)) ??
       "";
     // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
-    const ollamaCandidate = config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels)));
+    const transportError = providerTransportError(config.url);
+    const ollamaCandidate = !transportError && (config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels))));
     // Another server on this network is only asked for Ollama's model list once it has answered Ollama's version route.
     const answersAsOllama = () => isOllamaServer(config) || isOllama(ollamaOrigin(config.url));
     if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
@@ -256,7 +257,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     };
 
     const fetchModels = async () => {
-      if (!apiKey || apiKeyFormatError(apiKey)) return;
+      if (transportError || !apiKey || apiKeyFormatError(apiKey)) return;
       if (ollamaCandidate && await listOllama()) return;
       if (config.managedModels) return;
       try {
@@ -265,6 +266,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         if (nativeUrl) {
           try {
             const native = await fetch(nativeUrl, {
+              redirect: "error",
               headers: { authorization: `Bearer ${apiKey}` },
               signal: AbortSignal.timeout(8_000),
             });
@@ -292,6 +294,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           }
         }
         const response = await fetch(`${config.url}/models`, {
+          redirect: "error",
           headers: { authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(8_000),
         });

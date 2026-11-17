@@ -6,13 +6,17 @@ import { api, ApiError } from "@/state/api";
 import { t } from "@/lib/i18n";
 import { downloadSnippetFile } from "@/lib/code-block";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
-import type { ConversationFile, ConversationFileContent } from "../../shared/conversation-files";
+import type { ConversationFile, ConversationFileContent, ConversationUpload, ConversationUploadContent } from "../../shared/conversation-files";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { CodeBlock } from "./CodeBlock";
 
 const BUTTON = "inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40";
 const INPUT = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink focus:border-focus focus:outline-none";
 const fileError = (cause: unknown) => cause instanceof ApiError && cause.status === 404 ? t("workspaceFiles.missing") : String((cause as Error).message);
+type WorkspaceEntry = ConversationFile | ConversationUpload;
+type WorkspaceContent = ConversationFileContent | ConversationUploadContent;
+const isUpload = (file: WorkspaceEntry): file is ConversationUpload => "source" in file && file.source === "upload";
+const entryKey = (file: WorkspaceEntry) => isUpload(file) ? `upload:${file.id}` : `file:${file.name}`;
 
 export function ConversationFilesProvider({ threadId, canWrite, children }: { threadId: string; canWrite: boolean; children: ReactNode }) {
   const [opened, setOpened] = useState<{ threadId: string; draft?: WorkspaceDraft; fileName?: string } | null>(null);
@@ -47,23 +51,25 @@ export function ConversationFileLinks({ threadId, names }: { threadId: string; n
 function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClose }: { threadId: string; canWrite: boolean; draft?: WorkspaceDraft; initialFile?: string; onClose(): void }) {
   const endpoint = `/api/threads/${encodeURIComponent(threadId)}/workspace-files`;
   const dialog = useRef<HTMLDivElement>(null), request = useRef(0), mounted = useRef(true), pending = useRef(false);
-  const [files, setFiles] = useState<ConversationFile[]>([]);
-  const [selected, setSelected] = useState<ConversationFileContent | null>(null);
+  const [files, setFiles] = useState<WorkspaceEntry[]>([]);
+  const [selected, setSelected] = useState<WorkspaceContent | null>(null);
   const [editing, setEditing] = useState(Boolean(draft));
   const [name, setName] = useState(draft?.name ?? "notes.md");
   const [content, setContent] = useState(draft?.content ?? "");
   const [working, setWorking] = useState(false), [loading, setLoading] = useState(true);
   const [error, setError] = useState(""), [notice, setNotice] = useState("");
   const [confirm, setConfirm] = useState<"close" | "delete" | null>(null);
+  const uploaded = selected && isUpload(selected);
   const dirty = editing && (selected ? content !== selected.content : Boolean(content || name !== "notes.md"));
   const close = () => { if (!pending.current) { if (dirty) setConfirm("close"); else onClose(); } };
   useModalDialog(dialog, close);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current++; }; }, []);
 
   const refresh = useCallback(async () => {
-    const result = await api<{ files: ConversationFile[] }>(endpoint);
-    if (mounted.current) setFiles(result.files);
-    return result.files;
+    const result = await api<{ files: ConversationFile[]; uploads?: ConversationUpload[] }>(endpoint);
+    const entries = [...result.files, ...(result.uploads ?? [])].sort((a, b) => b.updatedAt - a.updatedAt || entryKey(a).localeCompare(entryKey(b)));
+    if (mounted.current) setFiles(entries);
+    return entries;
   }, [endpoint]);
   useEffect(() => {
     let active = true;
@@ -77,26 +83,27 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
     return () => { active = false; };
   }, [refresh, endpoint, initialFile]);
 
-  async function openFile(file: ConversationFile) {
+  async function openFile(file: WorkspaceEntry) {
     if (pending.current || editing) return;
     const id = ++request.current;
-    setError(""); setNotice(""); setLoading(true);
+    setError(""); setNotice(""); setLoading(true); setSelected(null);
     try {
-      const result = await api<ConversationFileContent>(`${endpoint}?name=${encodeURIComponent(file.name)}`);
-      if (mounted.current && id === request.current) { setSelected(result); setName(result.name); setContent(result.content); }
+      const query = isUpload(file) ? `upload=${encodeURIComponent(file.id)}` : `name=${encodeURIComponent(file.name)}`;
+      const result = await api<WorkspaceContent>(`${endpoint}?${query}`);
+      if (mounted.current && id === request.current) { setSelected(result); setName(result.name); setContent(result.content ?? ""); }
     } catch (cause) { if (mounted.current && id === request.current) setError(fileError(cause)); }
     finally { if (mounted.current && id === request.current) setLoading(false); }
   }
 
   async function mutate(remove = false) {
-    if (pending.current || !canWrite) return;
+    if (pending.current || !canWrite || uploaded) return;
     pending.current = true; request.current++; setWorking(true); setError(""); setNotice("");
     try {
       if (remove && selected) {
-        await api(endpoint, { method: "DELETE", body: JSON.stringify({ name: selected.name, revision: selected.revision }) });
+        await api(endpoint, { method: "DELETE", body: JSON.stringify({ name: selected.name, revision: "revision" in selected ? selected.revision : undefined }) });
         if (mounted.current) { setSelected(null); setContent(""); setConfirm(null); }
       } else {
-        const file = await api<ConversationFileContent>(endpoint, { method: "POST", body: JSON.stringify({ name, content, ...(selected ? { revision: selected.revision } : {}) }) });
+        const file = await api<ConversationFileContent>(endpoint, { method: "POST", body: JSON.stringify({ name, content, ...(selected && "revision" in selected ? { revision: selected.revision } : {}) }) });
         if (mounted.current) { setSelected(file); setName(file.name); setContent(file.content); setEditing(false); setNotice(t("workspaceFiles.saved")); }
       }
       await refresh();
@@ -118,9 +125,9 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
             <button type="button" disabled={working || loading} aria-label={t("workspaceFiles.refresh")} className={BUTTON} onClick={() => { setError(""); void refresh().catch((cause: Error) => setError(cause.message)); }}><RefreshCw size={14} /></button>
           </div>
           <div className="min-h-0 flex-1 overflow-auto px-2 pb-2" aria-label={t("workspaceFiles.list")}>
-            {files.map((file) => <button key={file.name} type="button" disabled={editing || working || Boolean(confirm)} aria-current={selected?.name === file.name ? "true" : undefined} onClick={() => void openFile(file)}
-              className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-[12px] disabled:opacity-50 ${selected?.name === file.name ? "bg-accent/10 text-accent" : "hover:bg-raised"}`}>
-              <FileText size={15} className="mt-0.5 shrink-0" /><span className="min-w-0"><span className="block truncate" title={file.name}>{file.name}</span><span className="text-[11px] text-ink-tertiary">{(file.bytes / 1024).toFixed(1)} KB</span></span>
+            {files.map((file) => <button key={entryKey(file)} type="button" disabled={editing || working || Boolean(confirm)} aria-current={selected && entryKey(selected) === entryKey(file) ? "true" : undefined} onClick={() => void openFile(file)}
+              className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-[12px] disabled:opacity-50 ${selected && entryKey(selected) === entryKey(file) ? "bg-accent/10 text-accent" : "hover:bg-raised"}`}>
+              <FileText size={15} className="mt-0.5 shrink-0" /><span className="min-w-0"><span className="block truncate" title={file.name}>{file.name}</span><span className="text-[11px] text-ink-tertiary">{isUpload(file) ? t("workspaceFiles.uploaded") : t("workspaceFiles.created")} · {isUpload(file) && !file.available ? t("workspaceFiles.unavailable") : `${(file.bytes / 1024).toFixed(1)} KB`}</span>{isUpload(file) && <span className="block text-[10px] text-ink-tertiary">{new Date(file.updatedAt).toLocaleString()}</span>}</span>
             </button>)}
             {!files.length && !loading && <p className="px-2 py-3 text-[12px] text-ink-secondary">{t("workspaceFiles.empty")}</p>}
           </div>
@@ -132,15 +139,18 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
               {editing && !selected ? <label className="min-w-0 flex-1"><span className="sr-only">{t("workspaceFiles.name")}</span><input className={INPUT} value={name} onChange={(event) => setName(event.target.value)} disabled={working} autoComplete="off" placeholder="analysis.md" /></label>
                 : <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{selected?.name}</span>}
               {!editing && selected && <>
-                <button type="button" disabled={loading || working} className={BUTTON} onClick={() => downloadSnippetFile(selected.name, selected.content)}><Download size={14} />{t("workspaceFiles.download")}</button>
-                {canWrite && <><button type="button" disabled={loading || working || Boolean(confirm)} className={BUTTON} onClick={() => { setEditing(true); setNotice(""); }}><Pencil size={14} />{t("workspaceFiles.edit")}</button>
+                {isUpload(selected) ? <a className={BUTTON} href={`${endpoint}?upload=${encodeURIComponent(selected.id)}&download=1`} download={selected.name}><Download size={14} />{t("workspaceFiles.download")}</a>
+                  : <button type="button" disabled={loading || working} className={BUTTON} onClick={() => downloadSnippetFile(selected.name, selected.content)}><Download size={14} />{t("workspaceFiles.download")}</button>}
+                {canWrite && !uploaded && <><button type="button" disabled={loading || working || Boolean(confirm)} className={BUTTON} onClick={() => { setEditing(true); setNotice(""); }}><Pencil size={14} />{t("workspaceFiles.edit")}</button>
                   <button type="button" disabled={loading || working || Boolean(confirm)} className={BUTTON} onClick={() => setConfirm("delete")} aria-label={t("workspaceFiles.delete")}><Trash2 size={14} /></button></>}
               </>}
             </div>
             {editing ? <textarea aria-label={t("workspaceFiles.content")} spellCheck={false} disabled={working} value={content} onChange={(event) => setContent(event.target.value)}
               className="min-h-0 flex-1 resize-none bg-inset p-4 font-mono text-[13px] leading-6 text-ink outline-none focus:ring-1 focus:ring-inset focus:ring-accent/40" />
               : <div className="min-h-0 flex-1 overflow-auto p-5"><ConversationFilesContext value={null}>
-                {/\.(md|markdown)$/i.test(selected?.name ?? "") ? <ChatMarkdown text={selected!.content} /> : <CodeBlock code={selected!.content} lang={selected!.name.split(".").at(-1) ?? "text"} initialWrap />}
+                {uploaded && <p className="mb-4 text-[12px] text-ink-secondary">{t("workspaceFiles.originalHint")}</p>}
+                {selected?.content === undefined ? <p className="text-[13px] text-ink-secondary">{t("workspaceFiles.downloadPreview")}</p>
+                  : /\.(md|markdown)$/i.test(selected.name) ? <ChatMarkdown text={selected.content} /> : <CodeBlock code={selected.content} lang={selected.name.split(".").at(-1) ?? "text"} initialWrap />}
               </ConversationFilesContext></div>}
           </> : <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center text-[13px] text-ink-secondary"><FolderOpen size={32} className="text-ink-tertiary" /><p>{t(loading ? "workspaceFiles.loading" : "workspaceFiles.hint")}</p></div>}
           {editing && <div className="flex justify-end gap-2 border-t border-hairline/30 px-4 py-3">

@@ -58,6 +58,7 @@ export async function checkKey(provider: TestableProvider): Promise<KeyCheck> {
   if (!answer.ok) {
     const text = answer.reason === "rejected" ? t("keys.testRejected")
       : answer.reason === "forbidden" ? t("keys.testForbidden")
+      : answer.reason === "insecure_transport" ? t("keys.testInsecureTransport")
       : answer.reason === "timeout" ? t("keys.testTimeout")
       : answer.reason === "unreachable" ? t("keys.testUnreachable")
         : t("keys.testUnexpected", { status: String(answer.status ?? "?") });

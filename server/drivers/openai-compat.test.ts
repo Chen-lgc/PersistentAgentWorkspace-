@@ -687,7 +687,7 @@ describe("OpenAICompatDriver", () => {
       instanceId: "test-include-usage",
       displayName: "Include usage",
       enabled: true,
-      config: { url: "http://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
+      config: { url: "https://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
       environment: { TEST_KEY: "secret" },
     });
     const recorder = recordEvents(inst.adapter);
@@ -733,7 +733,7 @@ describe("OpenAICompatDriver", () => {
       instanceId: "test-u25",
       displayName: "U25",
       enabled: true,
-      config: { url: "http://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
+      config: { url: "https://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
       environment: { TEST_KEY: "secret" },
     });
     const recorder = recordEvents(inst.adapter);

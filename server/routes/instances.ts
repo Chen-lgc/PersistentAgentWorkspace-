@@ -192,7 +192,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       const baseUrl = endpointBaseUrl(parsed.data.url);
       if (!baseUrl) return json(res, 200, { ok: false, reason: "invalid_url" });
       if (apiKeyFormatError(parsed.data.key) || /^https?:\/\//i.test(parsed.data.key)) return json(res, 200, { ok: false, reason: "invalid_key" });
-      const verdict = await checkProviderKey({ provider: "openaiCompat", url: baseUrl, key: parsed.data.key, allowRemoteHttp: true });
+      const verdict = await checkProviderKey({ provider: "openaiCompat", url: baseUrl, key: parsed.data.key });
       return json(res, 200, verdict.ok ? { ok: true, check: verdict.check } : verdict);
     }
 

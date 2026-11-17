@@ -132,6 +132,7 @@ describe("adding another OpenAI-compatible server", () => {
     [{ ok: false, status: 404 }, "does not provide this model catalog"],
     [{ ok: false, status: 429 }, "rate limiting"],
     [{ ok: false, reason: "timeout" }, "timed out"],
+    [{ ok: false, reason: "insecure_transport" }, "No key was sent"],
   ])("checks draft fields independently of saving and explains %j", async (answer, message) => {
     fixture.values = [];
     fixture.api.mockReset();

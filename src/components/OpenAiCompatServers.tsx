@@ -30,6 +30,7 @@ function connectionText(result: ConnectionVerdict): string {
   if (result.ok) return t(result.check === "authentication" ? "apiInstances.connectionAuthenticated" : "apiInstances.connectionOk");
   if (result.reason === "invalid_url") return t("apiInstances.connectionInvalidUrl");
   if (result.reason === "invalid_key") return t("apiInstances.connectionInvalidKey");
+  if (result.reason === "insecure_transport") return t("keys.testInsecureTransport");
   if (result.reason === "invalid_input") return t("apiInstances.connectionInvalidInput");
   if (result.reason === "timeout") return t("keys.testTimeout");
   if (result.reason === "unreachable") return t("keys.testUnreachable");

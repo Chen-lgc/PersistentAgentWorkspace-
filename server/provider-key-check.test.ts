@@ -11,11 +11,11 @@ describe("loopback hosts for HTTP key checks", () => {
     expect(isLoopback(host)).toBe(false);
   });
 
-  it.each(["http://127.example.test/v1", "http://127.0.0.1.example.test/v1"])("never sends a key to %s", async url => {
+  it.each(["http://remote.example.test/v1", "http://192.168.1.2/v1", "http://10.0.0.1/v1", "http://[fc00::1]/v1", "http://127.example.test/v1", "http://127.0.0.1.example.test/v1", "https://user:password@example.test/v1"])("never sends a key to %s", async url => {
     let calls = 0;
     const provider: typeof fetch = async () => { calls++; return Response.json({ data: [] }); };
     expect(await checkProviderKey({ provider: "openaiCompat", key: "fixture-key", url }, provider))
-      .toEqual({ ok: false, reason: "unexpected" });
+      .toEqual({ ok: false, reason: "insecure_transport" });
     expect(calls).toBe(0);
   });
 
@@ -35,7 +35,7 @@ describe("loopback hosts for HTTP key checks", () => {
     expect(calls).toBe(1);
   });
 
-  it("checks an explicitly allowed remote HTTP server without following redirects", async () => {
+  it("does not allow a legacy remote HTTP override to bypass the transport policy", async () => {
     const requests: string[] = [];
     const provider: typeof fetch = async (url, init) => {
       requests.push(String(url));
@@ -43,9 +43,9 @@ describe("loopback hosts for HTTP key checks", () => {
       expect(new Headers(init?.headers).get("authorization")).toBe("Bearer arbitrary-key");
       return Response.json({ data: [] });
     };
-    expect(await checkProviderKey({ provider: "openaiCompat", key: "arbitrary-key", url: "http://custom.example.test/v1", allowRemoteHttp: true }, provider))
-      .toEqual({ ok: true, check: "models", models: [] });
-    expect(requests).toEqual(["http://custom.example.test/v1/models"]);
+    const input = { provider: "openaiCompat" as const, key: "arbitrary-key", url: "http://custom.example.test/v1", allowRemoteHttp: true };
+    expect(await checkProviderKey(input, provider)).toEqual({ ok: false, reason: "insecure_transport" });
+    expect(requests).toEqual([]);
   });
 });
 
@@ -260,7 +260,7 @@ describe("provider key check", () => {
   it("refuses to send a key in clear to anything but a loopback test double", async () => {
     let called = false;
     const spy: typeof fetch = async () => { called = true; return new Response("{}"); };
-    expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: "http://models.example.test/v1" }, spy)).toEqual({ ok: false, reason: "unexpected" });
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: "http://models.example.test/v1" }, spy)).toEqual({ ok: false, reason: "insecure_transport" });
     expect(await checkProviderKey({ provider: "openaiCompat", key: "good-key", url: "not a url" }, spy)).toEqual({ ok: false, reason: "unexpected" });
     expect(called).toBe(false);
   });

@@ -301,10 +301,15 @@ export function messageAttachmentName(text: string, requested: string): string |
     return null;
   }
 
+  return messageAttachments(text).find((file) => {
+    try { return referencedPathIdentity(file.path) === wanted; } catch { return false; }
+  })?.name ?? null;
+}
+
+export function messageAttachments(text: string): Array<{ path: string; name: string }> {
   const tag = /^<attached-(?:image|file)[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>$/;
-  let found: string | null = null;
+  const found: Array<{ path: string; name: string }> = [];
   walkMarkdown(fromMarkdown(text), (node) => {
-    if (found !== null) return;
     if (node.type !== "html" || !node.value || !node.position) return;
     const start = node.position.start.offset;
     const end = node.position.end.offset;
@@ -315,14 +320,8 @@ export function messageAttachmentName(text: string, requested: string): string |
     if (text.slice(lineStart, start).trim() || text.slice(end, lineEnd).trim()) return;
     const match = tag.exec(node.value);
     if (!match) return;
-    try {
-      if (referencedPathIdentity(decodeAttachmentAttribute(match[1]!)) === wanted) {
-        found = safeDisplayName(match[2]
-          ? decodeAttachmentAttribute(match[2])
-          : decodeAttachmentAttribute(match[1]!));
-      }
-    } catch {
-    }
+    const path = decodeAttachmentAttribute(match[1]!);
+    found.push({ path, name: safeDisplayName(match[2] ? decodeAttachmentAttribute(match[2]) : path) });
   });
   return found;
 }

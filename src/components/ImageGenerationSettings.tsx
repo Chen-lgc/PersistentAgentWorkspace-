@@ -44,6 +44,7 @@ function imageTestText(provider: ImageProvider, result: ImageProviderTest): { ok
   if (result.reason === "model_missing") return { ok: false, text: t("imageGen.test.modelMissing", { model: result.model }) };
   if (result.reason === "rejected") return { ok: false, text: t("imageGen.test.rejected") };
   if (result.reason === "forbidden") return { ok: false, text: t("keys.testForbidden") };
+  if (result.reason === "insecure_transport") return { ok: false, text: t("keys.testInsecureTransport") };
   if (result.reason === "unreachable") return { ok: false, text: t("imageGen.test.unreachable") };
   if (result.reason === "no_key") return { ok: false, text: t("imageGen.key.missing") };
   if (result.reason === "no_url") return { ok: false, text: t("imageGen.test.noUrl") };
