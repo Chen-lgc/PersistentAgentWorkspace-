@@ -89,7 +89,7 @@ import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { createPersonStop } from "./host/person-stop.ts";
 import { createTurnOrder } from "./host/turn-order.ts";
 import { createQueuedNotes, createWaitWords } from "./host/wait-words.ts";
-import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type ParkedTurnAttachment } from "./host/turn-attachments.ts";
+import { createTurnFileParking, landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles } from "./host/turn-attachments.ts";
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
@@ -2303,21 +2303,12 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
 
-const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
-const workspaceFilesByTurn = new Map<string, Set<string>>();
+const turnFileParking = createTurnFileParking(deleteAttachment);
+const turnAttachmentsByTurn = turnFileParking.attachments;
 
 const turnAttachmentKey = parkedFilesKey;
 
-function purgeTurnAttachmentsForThread(threadId: string): void {
-  for (const key of workspaceFilesByTurn.keys()) if (key.startsWith(`${threadId}:`)) workspaceFilesByTurn.delete(key);
-  for (const [key, attachments] of turnAttachmentsByTurn) {
-    if (!key.startsWith(`${threadId}:`)) continue;
-    turnAttachmentsByTurn.delete(key);
-    for (const attachment of attachments) {
-      deleteAttachment(attachment.path);
-    }
-  }
-}
+const purgeTurnAttachmentsForThread = turnFileParking.purgeThread;
 
 function markCancelledProviderHandshake(threadId: string, ownerId: string): void {
   pendingCancelledProviderHandshakes.mark(threadId, ownerId);
@@ -2330,14 +2321,7 @@ function clearCancelledProviderHandshake(threadId: string, ownerId: string): voi
 
 function retireProviderTurn(turnId: string): void {
   retiredProviderTurns.retire(turnId);
-  for (const key of workspaceFilesByTurn.keys()) if (key.endsWith(`:${turnId}`)) workspaceFilesByTurn.delete(key);
-  for (const [key, attachments] of turnAttachmentsByTurn) {
-    if (!key.endsWith(`:${turnId}`)) continue;
-    turnAttachmentsByTurn.delete(key);
-    for (const attachment of attachments) {
-      deleteAttachment(attachment.path);
-    }
-  }
+  turnFileParking.retireTurn(turnId);
 }
 
 function shouldIgnoreProviderEvent(event: RuntimeEvent): boolean {
@@ -6408,15 +6392,8 @@ bus.subscribe((event: RuntimeEvent) => {
     if (strays.length) console.warn(`[turn-files] thread=${event.threadId} turn=${event.turnId ?? "none"} took files parked under ${strays.join(", ")}`);
     const { land, discard } = settleParkedFiles(files, redactSecretsInText, Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
     for (const file of discard) deleteAttachment(file.path);
-    const workspaceFiles = new Set<string>();
-    const workspaceTurnKey = turnAttachmentKey(event.threadId, completedTurnId ?? liveTurnByThread.get(event.threadId));
-    for (const [key, names] of workspaceFilesByTurn) {
-      if (!key.startsWith(`${event.threadId}:`)) continue;
-      workspaceFilesByTurn.delete(key);
-      if (key !== workspaceTurnKey && key !== turnAttachmentKey(event.threadId)) continue;
-      if (!goalCoordinatorTurn && !ambiguousCoordinatorText) for (const name of names) workspaceFiles.add(name);
-    }
-    landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage, [...workspaceFiles]);
+    const workspaceFiles = turnFileParking.takeWorkspace(event.threadId, completedTurnId ?? liveTurnByThread.get(event.threadId), Boolean(goalCoordinatorTurn || ambiguousCoordinatorText));
+    landTurnFiles(store, { threadId: event.threadId, turnId: completedTurnId, ...(speaker ? { from: speaker } : {}) }, land, pushMessage, workspaceFiles);
   };
 
   if (coordinatorVisibleText) pushAssistantText(coordinatorVisibleText, completedTurnId);
@@ -13007,12 +12984,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       };
       if (await conversationFilesInternal(conversationFiles, { method, path, res, json, threadId: internalCapability.threadId, readBody: readInternalBody,
-        saved: (name) => {
-          const key = turnAttachmentKey(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId));
-          const names = workspaceFilesByTurn.get(key) ?? new Set<string>();
-          names.add(name);
-          workspaceFilesByTurn.set(key, names);
-        },
+        saved: (name) => turnFileParking.saveWorkspace(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId), name),
       }) !== PASS) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
       const delegatedThisTurn = (taskId: string) => {

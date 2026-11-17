@@ -28,6 +28,50 @@ export function parkedFilesKey(threadId: string, turnId?: string): string {
   return `${threadId}:${turnId ?? "active"}`;
 }
 
+export function createTurnFileParking(deleteAttachment: (path: string) => void) {
+  const attachments = new Map<string, ParkedTurnAttachment[]>();
+  const workspace = new Map<string, Set<string>>();
+
+  const purgeThread = (threadId: string) => {
+    for (const key of workspace.keys()) if (key.startsWith(`${threadId}:`)) workspace.delete(key);
+    for (const [key, files] of attachments) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      attachments.delete(key);
+      for (const file of files) deleteAttachment(file.path);
+    }
+  };
+
+  const retireTurn = (turnId: string) => {
+    for (const key of workspace.keys()) if (key.endsWith(`:${turnId}`)) workspace.delete(key);
+    for (const [key, files] of attachments) {
+      if (!key.endsWith(`:${turnId}`)) continue;
+      attachments.delete(key);
+      for (const file of files) deleteAttachment(file.path);
+    }
+  };
+
+  const saveWorkspace = (threadId: string, turnId: string | undefined, name: string) => {
+    const key = parkedFilesKey(threadId, turnId);
+    const names = workspace.get(key) ?? new Set<string>();
+    names.add(name);
+    workspace.set(key, names);
+  };
+
+  const takeWorkspace = (threadId: string, turnId: string | undefined, coordinator: boolean): string[] => {
+    const files = new Set<string>();
+    const own = parkedFilesKey(threadId, turnId);
+    for (const [key, names] of workspace) {
+      if (!key.startsWith(`${threadId}:`)) continue;
+      workspace.delete(key);
+      if (key !== own && key !== parkedFilesKey(threadId)) continue;
+      if (!coordinator) for (const name of names) files.add(name);
+    }
+    return [...files];
+  };
+
+  return { attachments, purgeThread, retireTurn, saveWorkspace, takeWorkspace };
+}
+
 /** Takes what a settling turn parked, and with it anything parked on the thread under another turn: a thread runs one
  * turn at a time, so a file parked under any other key would otherwise never reach the person. */
 export function takeParkedFiles(
