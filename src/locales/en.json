@@ -10295,5 +10295,8 @@
   "workspaceFiles.savedFiles": "Saved files",
   "workspaceFiles.openFile": "Open file: {name}",
   "workspaceFiles.missing": "This file no longer exists or is not accessible.",
-  "chat.notice.workspaceFilesSaved": "Files saved."
+  "chat.notice.workspaceFilesSaved": "Files saved.",
+  "workspaceFiles.sharedDescription": "QBot and the “{department}” department share uploads and created files. Conversation history stays separate.",
+  "workspaceFiles.sharedSaved": "Saved in the shared file workspace. Members can refresh their file list to see it.",
+  "workspaceFiles.sharedLimits": "Created text: 512 KB/file; 100 files and 20 MB per shared store or historical source. Uploads use attachment storage limits."
 }

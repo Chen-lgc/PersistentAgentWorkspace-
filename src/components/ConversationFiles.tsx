@@ -6,7 +6,7 @@ import { api, ApiError } from "@/state/api";
 import { t } from "@/lib/i18n";
 import { downloadSnippetFile } from "@/lib/code-block";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
-import type { ConversationFile, ConversationFileContent, ConversationUpload, ConversationUploadContent } from "../../shared/conversation-files";
+import type { ConversationFile, ConversationFileContent, ConversationUpload, ConversationUploadContent, FileWorkspaceScope } from "../../shared/conversation-files";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { CodeBlock } from "./CodeBlock";
 
@@ -16,7 +16,7 @@ const fileError = (cause: unknown) => cause instanceof ApiError && cause.status 
 type WorkspaceEntry = ConversationFile | ConversationUpload;
 type WorkspaceContent = ConversationFileContent | ConversationUploadContent;
 const isUpload = (file: WorkspaceEntry): file is ConversationUpload => "source" in file && file.source === "upload";
-const entryKey = (file: WorkspaceEntry) => isUpload(file) ? `upload:${file.id}` : `file:${file.name}`;
+const entryKey = (file: WorkspaceEntry) => isUpload(file) ? `upload:${file.id}` : `file:${file.readName ?? file.name}`;
 
 export function ConversationFilesProvider({ threadId, canWrite, children }: { threadId: string; canWrite: boolean; children: ReactNode }) {
   const [opened, setOpened] = useState<{ threadId: string; draft?: WorkspaceDraft; fileName?: string } | null>(null);
@@ -43,7 +43,7 @@ export function ConversationFileLinks({ threadId, names }: { threadId: string; n
   return <div className="mt-3 flex flex-col items-start gap-1.5" aria-label={t("workspaceFiles.savedFiles")}>
     {[...new Set(names)].map((name) => <a key={name} href={`#workspace-file=${encodeURIComponent(name)}`} onClick={(event) => { event.preventDefault(); workspace.openFile(name); }}
       className="inline-flex max-w-full items-center gap-1.5 rounded text-[13px] text-accent underline decoration-accent/40 underline-offset-4 hover:decoration-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
-      <FileText size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 break-all">{t("workspaceFiles.openFile", { name })}</span>
+      <FileText size={15} className="shrink-0" aria-hidden="true" /><span className="min-w-0 break-all">{t("workspaceFiles.openFile", { name: name.replace(/^shared:[\w-]+:/, "") })}</span>
     </a>)}
   </div>;
 }
@@ -52,6 +52,7 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
   const endpoint = `/api/threads/${encodeURIComponent(threadId)}/workspace-files`;
   const dialog = useRef<HTMLDivElement>(null), request = useRef(0), mounted = useRef(true), pending = useRef(false);
   const [files, setFiles] = useState<WorkspaceEntry[]>([]);
+  const [scope, setScope] = useState<FileWorkspaceScope | null>(null);
   const [selected, setSelected] = useState<WorkspaceContent | null>(null);
   const [editing, setEditing] = useState(Boolean(draft));
   const [name, setName] = useState(draft?.name ?? "notes.md");
@@ -66,9 +67,9 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current++; }; }, []);
 
   const refresh = useCallback(async () => {
-    const result = await api<{ files: ConversationFile[]; uploads?: ConversationUpload[] }>(endpoint);
+    const result = await api<{ files: ConversationFile[]; uploads?: ConversationUpload[]; scope?: FileWorkspaceScope }>(endpoint);
     const entries = [...result.files, ...(result.uploads ?? [])].sort((a, b) => b.updatedAt - a.updatedAt || entryKey(a).localeCompare(entryKey(b)));
-    if (mounted.current) setFiles(entries);
+    if (mounted.current) { setFiles(entries); setScope(result.scope ?? null); }
     return entries;
   }, [endpoint]);
   useEffect(() => {
@@ -88,7 +89,7 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
     const id = ++request.current;
     setError(""); setNotice(""); setLoading(true); setSelected(null);
     try {
-      const query = isUpload(file) ? `upload=${encodeURIComponent(file.id)}` : `name=${encodeURIComponent(file.name)}`;
+      const query = isUpload(file) ? `upload=${encodeURIComponent(file.id)}` : `name=${encodeURIComponent(file.readName ?? file.name)}`;
       const result = await api<WorkspaceContent>(`${endpoint}?${query}`);
       if (mounted.current && id === request.current) { setSelected(result); setName(result.name); setContent(result.content ?? ""); }
     } catch (cause) { if (mounted.current && id === request.current) setError(fileError(cause)); }
@@ -100,11 +101,11 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
     pending.current = true; request.current++; setWorking(true); setError(""); setNotice("");
     try {
       if (remove && selected) {
-        await api(endpoint, { method: "DELETE", body: JSON.stringify({ name: selected.name, revision: "revision" in selected ? selected.revision : undefined }) });
+        await api(endpoint, { method: "DELETE", body: JSON.stringify({ name: selected.readName ?? selected.name, revision: "revision" in selected ? selected.revision : undefined }) });
         if (mounted.current) { setSelected(null); setContent(""); setConfirm(null); }
       } else {
-        const file = await api<ConversationFileContent>(endpoint, { method: "POST", body: JSON.stringify({ name, content, ...(selected && "revision" in selected ? { revision: selected.revision } : {}) }) });
-        if (mounted.current) { setSelected(file); setName(file.name); setContent(file.content); setEditing(false); setNotice(t("workspaceFiles.saved")); }
+        const file = await api<ConversationFileContent>(endpoint, { method: "POST", body: JSON.stringify({ name: selected?.readName ?? name, content, ...(selected && "revision" in selected ? { revision: selected.revision } : {}) }) });
+        if (mounted.current) { setSelected(file); setName(file.name); setContent(file.content); setEditing(false); setNotice(t(scope ? "workspaceFiles.sharedSaved" : "workspaceFiles.saved")); }
       }
       await refresh();
     } catch (cause) { if (mounted.current) setError((cause as Error).message); }
@@ -115,7 +116,7 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
     <div ref={dialog} role="dialog" aria-modal="true" aria-label={t("workspaceFiles.title")} tabIndex={-1} aria-busy={working || undefined}
       className="flex h-[min(760px,90dvh)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel text-ink shadow-2xl">
       <header className="flex items-start justify-between gap-3 border-b border-hairline/40 px-5 py-4">
-        <div><h2 className="flex items-center gap-2 text-[16px] font-semibold"><FolderOpen size={18} />{t("workspaceFiles.title")}</h2><p className="mt-1 text-[12px] text-ink-secondary">{t("workspaceFiles.description")}</p></div>
+        <div><h2 className="flex items-center gap-2 text-[16px] font-semibold"><FolderOpen size={18} />{t("workspaceFiles.title")}</h2><p className="mt-1 text-[12px] text-ink-secondary">{scope ? t("workspaceFiles.sharedDescription", { department: scope.label }) : t("workspaceFiles.description")}</p>{scope && <p className="mt-1 text-[11px] text-ink-tertiary">{scope.members.join(" · ")}</p>}</div>
         <button type="button" onClick={close} disabled={working} className={BUTTON} aria-label={t("common.close")}><X size={18} /></button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
@@ -127,11 +128,11 @@ function ConversationFilesDialog({ threadId, canWrite, draft, initialFile, onClo
           <div className="min-h-0 flex-1 overflow-auto px-2 pb-2" aria-label={t("workspaceFiles.list")}>
             {files.map((file) => <button key={entryKey(file)} type="button" disabled={editing || working || Boolean(confirm)} aria-current={selected && entryKey(selected) === entryKey(file) ? "true" : undefined} onClick={() => void openFile(file)}
               className={`mb-1 flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left text-[12px] disabled:opacity-50 ${selected && entryKey(selected) === entryKey(file) ? "bg-accent/10 text-accent" : "hover:bg-raised"}`}>
-              <FileText size={15} className="mt-0.5 shrink-0" /><span className="min-w-0"><span className="block truncate" title={file.name}>{file.name}</span><span className="text-[11px] text-ink-tertiary">{isUpload(file) ? t("workspaceFiles.uploaded") : t("workspaceFiles.created")} · {isUpload(file) && !file.available ? t("workspaceFiles.unavailable") : `${(file.bytes / 1024).toFixed(1)} KB`}</span>{isUpload(file) && <span className="block text-[10px] text-ink-tertiary">{new Date(file.updatedAt).toLocaleString()}</span>}</span>
+              <FileText size={15} className="mt-0.5 shrink-0" /><span className="min-w-0"><span className="block truncate" title={file.name}>{file.name}</span><span className="text-[11px] text-ink-tertiary">{isUpload(file) ? t("workspaceFiles.uploaded") : t("workspaceFiles.created")} · {isUpload(file) && !file.available ? t("workspaceFiles.unavailable") : `${(file.bytes / 1024).toFixed(1)} KB`}</span>{file.sourceLabel && <span className="block truncate text-[10px] text-ink-tertiary" title={file.sourceLabel}>{file.sourceLabel}</span>}{isUpload(file) && <span className="block text-[10px] text-ink-tertiary">{new Date(file.updatedAt).toLocaleString()}</span>}</span>
             </button>)}
             {!files.length && !loading && <p className="px-2 py-3 text-[12px] text-ink-secondary">{t("workspaceFiles.empty")}</p>}
           </div>
-          <p className="border-t border-hairline/30 px-4 py-2 text-[11px] text-ink-tertiary">{t("workspaceFiles.limits")}</p>
+          <p className="border-t border-hairline/30 px-4 py-2 text-[11px] text-ink-tertiary">{t(scope ? "workspaceFiles.sharedLimits" : "workspaceFiles.limits")}</p>
         </aside>
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
           {(selected || editing) ? <>

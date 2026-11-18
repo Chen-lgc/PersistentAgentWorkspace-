@@ -28,6 +28,7 @@ import {
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
+import { ensureSectionMemoryKey, readSections } from "../section-context.ts";
 import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
@@ -129,6 +130,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const body = await readBody(req);
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatchForPerson(body);
+      if (patch.fileWorkspaceSharing?.department !== undefined) {
+        const department = patch.fileWorkspaceSharing.department;
+        if (department && !readSections().includes(department)) return json(res, 400, { error: "Choose an existing department for file sharing." });
+        patch.fileWorkspaceSharing.departmentKey = ensureSectionMemoryKey(department);
+      }
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;

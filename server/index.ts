@@ -12,6 +12,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { createConversationFiles, CONVERSATION_FILES_PROMPT } from "./conversation-files.ts";
 import { createConversationFileRoutes, conversationFilesInternal } from "./routes/conversation-files.ts";
+import { createSharedFileWorkspace } from "./shared-file-workspace.ts";
+import { ensureSectionMemoryKey as fileDepartmentIdentity } from "./section-context.ts";
 import { createConversationUploads } from "./conversation-uploads.ts";
 import { basename, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
@@ -8420,6 +8422,10 @@ async function beginTurn(
       const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length;
       const held = limitTakeover.heldAtStart(bot, { instanceId, model }, startupRecovery); // a limit or a sign-out already known: straight to an AI that can carry on, with the reset only when one was named
       if (held) throw held.scope === "signed-out" ? Object.assign(new TurnAuthenticationRefusedError(`signed-out-${randomUUID()}`, `${engineName(instanceId)} is signed out.`, true), userErrorFields(userError("serverError.engine.signedOut", { name: engineName(instanceId) }))) : new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, held.resetsAt, held.scope, true);
+      const pdfSource = coordinationNode?.parentId
+        ? store.activePath(threadId).findLast(message => message.roomRequest?.phase === "request"
+          && message.roomRequest.id === coordinator.sharedRequest(coordinationNode).id)?.id
+        : pendingSource;
       const dispatch = await guardTurnDispatch(shareNote.after(savedSteps.dispatch.sendTurn(instance, personLine && !opts?.unattended && !opts?.app?.context && !guestConfined ? { botId: bot.id, message: userMessage, turnText: text, placePicked: wants === "local" && placeSource !== "auto-pin" } : null, {
         threadId,
         botId: bot.id,
@@ -8427,7 +8433,7 @@ async function beginTurn(
         text: withTurnClock(clock, withRecalled(recalled, attachmentsForBox(dispatchContext.turnText, cwd) + shareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
         ...(recalled ? { recalled } : {}),
         images: dispatchContext.images,
-        ...(instance.driverKind === "openai-compat" ? { pdfs: store.conversationPdfs(threadId, pendingSource) } : {}),
+        ...(instance.driverKind === "openai-compat" ? { pdfs: fileWorkspacePdfs(threadId, pdfSource) } : {}),
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         approvalModeNow: () => liveApprovalMode(bot, threadId, commsDepth > 0),
         toolScope,
@@ -9793,7 +9799,7 @@ async function runClaimedGroupMemberTurn(
   );
   const roomContext = roomWindow.text;
   const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images, ...await videoFramesWithin(burstImages.length + resolvedLatestImages.images.length, resolvedLatestImages.videos)] : [];
-  const turnPdfs = instance.driverKind === "openai-compat" ? store.conversationPdfs(threadId, latestUser?.id) : [];
+  const turnPdfs = instance.driverKind === "openai-compat" ? fileWorkspacePdfs(threadId, latestUser?.id) : [];
   const skills = availableSkills(), phoneOffered = usbPhoneOffered(instance, skills);
   const selectedSkills = mergeSkills(
     selectBundledSkills(
@@ -11702,6 +11708,7 @@ function configStatus() {
   const eventLogMaxBytes = threadEventLogMaxBytes(cfg);
   const eventLogRetentionDays = threadEventLogRetentionDays(cfg);
   return {
+    fileWorkspaceSharing: cfg.fileWorkspaceSharing ?? { enabled: false },
     cloudStarter: cloudPlanTier.starter(), waitingForRoom: engineMemory.waiting(), planTurns: starterCaps.status(), awakeLimit: starterAwake.limit(), pausedBots: starterAwake.paused(), xai: keyStatus(cfg.xai?.key),
     mistral: keyStatus(cfg.mistral?.key),
     cerebras: keyStatus(cfg.cerebras?.key),
@@ -12079,9 +12086,18 @@ ROUTES.push(createBotMessageRoutes({
 const liveRoots = (threadId: string, botId: string | undefined) => { const bot = botId ? store.bot(botId) : store.botByThread(threadId); return bot ? messageFileRootsForThread(bot.id, threadId).filter((root) => root !== ATTACHMENTS_DIR) : null; }; const chatApps = createChatApps({ store, dataDir: DATA_DIR, liveRows: liveAppRows, liveRoots, paused: () => workspaceMaintenance.active || moveFreeze.frozen() });
 const conversationFiles = createConversationFiles(DATA_DIR);
 const conversationUploads = createConversationUploads(DATA_DIR, (threadId) => store.messagesFor(threadId));
+const sharedFileWorkspace = createSharedFileWorkspace({ files: conversationFiles, uploads: conversationUploads,
+  settings: () => !CLOUD_TEAM && !HOSTED_WORKSPACE && !sharedMembership() ? cfg.fileWorkspaceSharing : undefined,
+  bots: () => store.bots, sections: () => store.sections, sectionIdentity: fileDepartmentIdentity, attachmentsDir: ATTACHMENTS_DIR,
+});
+function fileWorkspacePdfs(threadId: string, throughMessageId?: string) {
+  const files = [...store.conversationPdfs(threadId, throughMessageId), ...sharedFileWorkspace.referencedPdfs(threadId, store.activePath(threadId), throughMessageId)];
+  return [...new Map(files.map(file => [file.path, file])).values()];
+}
 ROUTES.push(createConversationFileRoutes({
   files: conversationFiles,
   uploads: conversationUploads,
+  shared: sharedFileWorkspace,
   visible: (auth, threadId) => Boolean(store.botByThread(threadId) || store.groupByThread(threadId)) && (auth.kind !== "session" || sessions.isLive(auth.session.id)) && visibleTo(viewerFor(auth)).thread(threadId),
   writeRefusal: (auth, threadId) => workspaceMaintenance.active || moveFreeze.frozen() ? "The workspace is being moved or restored. Try again when it finishes." : cloudThreadRefusal(auth, threadId),
 }));
@@ -12961,6 +12977,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       };
       if (await conversationFilesInternal(conversationFiles, { method, path, res, json, threadId: internalCapability.threadId, readBody: readInternalBody,
         uploads: conversationUploads,
+        shared: sharedFileWorkspace,
         saved: (name) => turnFileParking.saveWorkspace(internalCapability.threadId, liveTurnByThread.get(internalCapability.threadId), name),
       }) !== PASS) return;
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;

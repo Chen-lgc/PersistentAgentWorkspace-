@@ -6,7 +6,10 @@ message database. Before an OpenAI-compatible turn, QBot collects references
 from the active conversation branch up to the triggering user message and
 deduplicates them. Ordinary context compaction does not remove references;
 Start fresh and switching to a branch without the upload exclude them. Other
-conversations never inherit them. Existing messages are migrated from their
+conversations never inherit them automatically. An explicitly configured
+[shared file workspace](shared-file-workspace.md) additionally lets a member
+reference a shared PDF by its unique filename or upload reference in its own
+conversation; the shared scope is checked again on every turn. Existing messages are migrated from their
 owned upload tags on the next API turn.
 
 The existing API adapter sends saved PDF bytes and the selected history to the
@@ -15,8 +18,10 @@ file extraction route described below. Qianfan OCR is not used, and no other
 chat model is selected to parse documents. PDF capability is independent of image input.
 Explicit `/models` PDF metadata is used when present; otherwise the adapter
 tries the actual PDF. A file schema refusal can try the same model through
-Responses. An explicit PDF rejection falls back to the same model with history
-text and a notice, before any answer or tool execution. The model is told that
+Responses. An explicit PDF rejection removes file parts and supplies attachment
+identifiers and task-delegation instructions to the same model, with a notice,
+before any answer or tool execution. The model is told to assign the actual
+user task and original reference to the responsible specialist, and that
 summaries are not the original document. Credentials, size limits, corrupt
 files, timeouts and unrelated provider errors remain errors.
 An error listing only `text`, `image_url` and `video_url` as allowed message
@@ -35,8 +40,10 @@ acceptance, not the quality of the provider's document interpretation. Unknown
 error formats remain visible rather than silently discarding the PDF.
 
 The native request limit remains `TURN_PDF_MAX_BYTES` (currently 50 MiB total).
-The provider may impose lower limits. Known unsupported models do not read the
-saved file bytes or apply this send limit. Missing or changed originals produce
+The provider may impose lower limits. Known unsupported models receive only
+attachment identifiers and delegation guidance, without reading the file bytes
+or applying the native send limit. The receiving bot validates and sends the
+original through its own supported PDF route. Missing or changed originals produce
 an explicit error for models receiving PDFs. Each compatible follow-up resends
 the original files, so the provider can charge for them again.
 
@@ -85,11 +92,44 @@ other external fetches. Exercise these steps via `control-omb`, retaining its
    the outgoing chat has extracted text without a `file` part, and a reply is
    saved under the selected model.
 3. Ask a follow-up without attaching again; assert no second upload.
-4. Switch to a relay model that rejects PDF parts; assert history-only fallback
-   contains the Kimi summary but no cached extraction text.
+4. Switch to a relay model that rejects PDF parts; assert the request contains
+   delegation instructions and original upload references, without any locally
+   extracted PDF text or Kimi extraction cache.
 5. Switch back to a different Kimi model, then restart the isolated server in
    the same temporary workspace; both turns must reuse the cached extraction.
 6. Switch to a native-PDF relay model; assert original PDF parts are still sent.
    Start a separate conversation and confirm no PDF contents are inherited.
 7. Stop the exact fixture children and remove their temporary workspace. These
    checks prove routing and persistence, not live Kimi parsing quality or billing.
+
+## Task delegation after native PDF refusal
+
+QBot does not extract PDF text locally. When the selected interface explicitly
+rejects PDF input (including cached or declared refusal), the runtime supplies
+filenames and exact `upload:` references plus scoped delegation guidance. The
+bot chooses a teammate by the user's requested work and the teammate's duties,
+passing the original reference and full requirements. Summary, related-work,
+experiment, knowledge-management and tutoring tasks keep their respective scope;
+they are not replaced with generic summaries or transcription requests.
+
+The receiving bot reads the original using its own supported native or provider
+PDF route, and returns the requested analysis with verifiable citations. The
+coordinator reviews the result and identifies the source of the evidence. If no
+appropriate teammate can read the PDF, it reports which responsible bot needs a
+compatible model rather than inventing content or passing the file in a loop.
+This guidance does not itself dispatch work: the existing `coordinate_bots`
+workflow performs actual task assignment and returns its receipts.
+
+No local extraction code, worker or parser dependency remains. Previously saved
+`pdf-text-v1/` cache files are not read or modified. The existing official Kimi
+file service remains part of that provider's supported PDF route; it does not
+supply another bot's model with extracted text automatically. Provider credential,
+quota and unrelated transport errors remain visible and do not trigger delegation
+as though PDF input had been rejected.
+
+`server/delegated-pdfs.e2e.test.ts` exercises a real API-model coordinator against
+a loopback provider: declared and observed PDF refusal, five task-specific
+recipients, original bytes and report saving, follow-ups, a newly delegated
+supplement after an intervening user message, department isolation, restart,
+an unreadable recipient and unchanged old extraction caches. Simulated model
+answers verify orchestration and request contents, not live-model planning quality.

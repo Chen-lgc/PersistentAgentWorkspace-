@@ -49,7 +49,7 @@ export function createConversationUploads(dataDir: string, messages: (threadId: 
   async function read(threadId: string, id: string): Promise<ConversationUploadContent> {
     const { file, handle } = await openFile(threadId, id);
     try {
-      const unavailable = { ...file, contentUnavailable: "The original is saved and downloadable. Only UTF-8 text up to 512 KB can be read here; binary documents require the model's attachment capability." };
+      const unavailable = { ...file, contentUnavailable: "The original is saved and downloadable. This tool returns content only for UTF-8 text up to 512 KB. PDFs require the selected model's supported PDF route. If unavailable, delegate the task and exact upload reference to the responsible PDF-capable bot. This metadata is not document content." };
       if (file.bytes > CONVERSATION_FILE_LIMITS.fileBytes || /^(image|audio|video)\//.test(file.mime) || /\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|zip)$/i.test(id)) return unavailable;
       const buffer = Buffer.alloc(CONVERSATION_FILE_LIMITS.fileBytes + 1);
       let length = 0;

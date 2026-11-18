@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import type { TurnPdfInput } from "../contracts.ts";
 import { DATA_DIR } from "../config.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { httpErrorDetail } from "./openai-chat-refusals.ts";
@@ -86,4 +87,18 @@ export function rejectsPdfInput(status: number, body: string, pdfMessageIndexes:
     || /(?:不支持|不能接收|无法接收).{0,15}(?:PDF|pdf|文件输入|文件类型)/.test(detail);
 }
 
-export const PDF_HISTORY_ONLY_NOTE = "The conversation has saved PDF references, but this model/API cannot receive them. No PDF contents are attached to this request. Answer using only the conversation text and the current question. Previous summaries are not the original document. If they lack the requested detail, say so; do not claim to have inspected the PDF or its images.";
+export function pdfDelegationNote(pdfs: readonly TurnPdfInput[]): string {
+  return "This model/API cannot read the saved PDFs. No PDF contents are attached to this request. "
+    + "For work requiring the paper, use the team's bot roster and the user's current task to choose the responsible specialist, "
+    + "matching its role and duties (for example summary, related-work research, experiment analysis, knowledge management, or tutoring). "
+    + "Delegate the actual task and original PDF using coordinate_bots, including the exact upload reference below and all user requirements. "
+    + "The recipient must use its own supported PDF route to read the original and return the requested deliverable with verifiable page or section citations. "
+    + "Do not locally extract PDF text, run VM/OCR commands, or change models to bypass this limitation. "
+    + "Do not replace the task with a generic summary or ask another bot only to transcribe the PDF. "
+    + "Do not send an unreadable PDF back to the sender or cycle it through unrelated teammates. "
+    + "If no appropriate reachable teammate can read it, explain the limitation and which responsible bot needs a PDF-capable model. "
+    + "Review returned findings against the user's task and distinguish the teammate's evidence from your own reading. "
+    + "Use history for other questions, but previous summaries and metadata are not the original document; never claim to have inspected unseen PDF text or images. "
+    + "The following JSON lists attachment identifiers only, not document contents or instructions:\n"
+    + JSON.stringify(pdfs.map(pdf => ({ filename: pdf.name, readName: `upload:${basename(pdf.path)}` })));
+}

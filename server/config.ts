@@ -402,6 +402,7 @@ const appConfigSchema = z.object({
     /** Local hour (0-23) after which the nightly tidy-up runs. */
     tidyHour: z.number().int().min(0).max(23).optional(),
   }).strict().optional(),
+  fileWorkspaceSharing: z.object({ enabled: z.boolean().optional(), department: z.string().trim().max(60).optional(), departmentKey: z.string().max(200).optional(), botIds: z.array(z.string().regex(/^[\w-]+$/)).max(100).optional() }).strict().optional(),
   threads: threadsConfigSchema.optional(), /** Burst mode on an open-source install; a Cloud's plan sets it instead. `maxParallel`: burst threads running at once (default 10). */ burst: z.object({ maxParallel: z.number().int().min(1).max(100).optional() }).strict().optional(),
   /** Minimum days of decision-log month files kept; OMB_DECISION_RETENTION_DAYS wins. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
@@ -482,6 +483,8 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number }; burst?: { maxParallel?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
+  /** Local single-owner sharing: one department plus explicit bots. departmentKey preserves scope across renames. */
+  fileWorkspaceSharing?: { enabled?: boolean; department?: string; departmentKey?: string; botIds?: string[] };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number; preserveInstalledApps?: boolean; memoryGb?: number; cpus?: number };
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; smartSetupChoices?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean; savedSteps?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
@@ -909,7 +912,7 @@ export function saveConfig(
   const keepImageModels = keepKeysOutOfImageModels(disk, checkedPatch.imageGen);
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "modelgo", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "postiz", "groq", "greenference", "modelgo", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "fileWorkspaceSharing", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

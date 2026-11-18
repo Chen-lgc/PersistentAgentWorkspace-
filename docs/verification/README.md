@@ -48,6 +48,7 @@ Use only mapped, tested commands:
 - [OpenAI reply readout](openai-readout.md)
 - [Conversation context compaction](context-compaction.md)
 - [Persistent conversation PDF references](conversation-pdfs.md)
+- [Shared paper file workspace](shared-file-workspace.md)
 - [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [Per-bot tool selection and local-model checks](tool-selection.md)

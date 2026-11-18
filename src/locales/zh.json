@@ -10295,5 +10295,8 @@
   "workspaceFiles.savedFiles": "已保存的文件",
   "workspaceFiles.openFile": "打开文件：{name}",
   "workspaceFiles.missing": "该文件已不存在，或当前无法访问。",
-  "chat.notice.workspaceFilesSaved": "文件已保存。"
+  "chat.notice.workspaceFilesSaved": "文件已保存。",
+  "workspaceFiles.sharedDescription": "QBot 与「{department}」部门共享上传原件和生成文件。会话记录保持独立。",
+  "workspaceFiles.sharedSaved": "已保存到共享文件工作区，成员刷新列表后即可查看。",
+  "workspaceFiles.sharedLimits": "生成文本每个 512 KB；共享区与各历史来源分别最多 100 个、20 MB。上传原件使用附件存储限制。"
 }

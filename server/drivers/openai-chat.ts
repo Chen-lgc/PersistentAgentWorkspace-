@@ -16,7 +16,7 @@ import { noteToolBudget } from "../tool-budgets.ts";
 import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, imageTransportAllowed, type ChatContentPart } from "./chat-images.ts";
 import { chatPdfParts } from "./chat-pdfs.ts";
-import { PDF_HISTORY_ONLY_NOTE, pdfNeedsResponses, rejectsPdfInput, UnsupportedPdfInputError } from "./pdf-capabilities.ts";
+import { pdfDelegationNote, pdfNeedsResponses, rejectsPdfInput, UnsupportedPdfInputError } from "./pdf-capabilities.ts";
 import { withoutTurnPdfTags } from "../turn-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
@@ -470,15 +470,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
-    const usePdfHistoryOnly = () => {
+    const removePdfParts = () => {
       for (const message of messages) if (Array.isArray(message.content)) {
         const parts = message.content.filter((part) => part.type !== "file");
         message.content = parts.every((part) => part.type === "text") ? parts.map((part) => part.text).join("\n") : parts;
       }
+    };
+    const usePdfDelegationContext = () => {
+      removePdfParts();
+      const note = pdfDelegationNote(turn.pdfs ?? []);
       const system = messages.find((message) => message.role === "system" && typeof message.content === "string");
-      if (system) system.content += `\n\n${PDF_HISTORY_ONLY_NOTE}`;
-      else messages.unshift({ role: "system", content: PDF_HISTORY_ONLY_NOTE });
-      emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `模型 ${model} 的当前接口不支持传入 PDF，本轮仅根据历史文字和当前问题回答。PDF 已保留在本会话中。` });
+      if (system) system.content += `\n\n${note}`;
+      else messages.unshift({ role: "system", content: note });
+      emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `模型 ${model} 的当前接口不支持读取 PDF。已保留原件和附件引用；需要读取论文的任务应交给职责匹配且能读取 PDF 的 Bot。` });
     };
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length > 0;
     const credentials = [options.apiKey].filter(maskable);
@@ -535,7 +539,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
-    if (turn.pdfs?.length && !pdfAttached && !extractPdfs) usePdfHistoryOnly();
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -555,6 +558,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
+        if (turn.pdfs?.length && !pdfAttached && !extractPdfs) usePdfDelegationContext();
         if (extractPdfs) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: "正在准备会话 PDF 的文件解析内容；已解析过的文件将复用本地缓存。" });
           const content = await options.pdfText!(turn.pdfs!, abort.signal);
@@ -635,7 +639,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (error instanceof UnsupportedPdfInputError && pdfAttached && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted) {
                 options.recordPdfSupport?.(model, false);
                 pdfAttached = false;
-                usePdfHistoryOnly();
+                usePdfDelegationContext();
                 continue;
               }
               const verdict = classifyError(error);

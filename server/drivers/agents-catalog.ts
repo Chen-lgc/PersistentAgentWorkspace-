@@ -348,13 +348,13 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "workspace_file",
-    description: "Create, read or list persistent UTF-8 code and Markdown files in this conversation's file workspace. Use write with name and content to save a requested deliverable (no code fences around content); the user can view, edit and download it from File workspace. Files survive model switches and restarts. Only this conversation is accessible. Use one file name, not a path. Up to 512 KB per file, 100 files and 20 MB total. An existing name is never overwritten unless you first read it and pass its revision. Use list/read when continuing work on existing files. Saving never executes code.",
+    description: "Create, read or list persistent UTF-8 code and Markdown files in this conversation's file workspace. Use write with name and content to save a requested deliverable (no code fences around content); the user can view, edit and download it from File workspace. Files survive model switches and restarts. When file sharing is configured, list includes the department's shared files and uploads, with scope and source labels. Otherwise only this conversation is accessible. Use list first and use a file's exact readName for read or updates; names may repeat across sources. For a new file use one plain file name, not a path. Up to 512 KB per file, 100 files and 20 MB total. An existing name is never overwritten unless you first read it and pass its revision. Use list/read when continuing work on existing files. Saving never executes code.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         action: { type: "string", enum: ["list", "read", "write"] },
-        name: { type: "string", maxLength: 180, description: "A file name such as analysis.md or main.py; required for read/write." },
+        name: { type: "string", maxLength: 400, description: "For new files: a file name such as analysis.md. For reading or updating: the exact readName from list. Uploads are read-only." },
         content: { type: "string", maxLength: 524288, description: "Complete UTF-8 file contents; required for write." },
         revision: { type: "string", maxLength: 64, description: "The revision from read; required to replace an existing file. Omit for new files." },
       },
