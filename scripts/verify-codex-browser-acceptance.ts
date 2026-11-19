@@ -1,4 +1,4 @@
-// Real model acceptance through the full, isolated OpenMausBot server.
+// Real model acceptance through the full, isolated QBot server.
 // The prompts contain goals only, never tool names or execution advice.
 import { copyFileSync, mkdirSync, writeFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -75,7 +75,7 @@ try {
     await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser", browser: true });
     const prompts = [
       "Open Google Calendar in your own browser.",
-      "Open the GitHub page for milind-soni/OpenMausBot in your browser and tell me how the project is described there.",
+      "Open the GitHub page for milind-soni/QBot in your browser and tell me how the project is described there.",
     ];
     for (const [index, prompt] of prompts.entries()) {
       const entry: any = { model, botId: bot.id, prompt };

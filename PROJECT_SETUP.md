@@ -1,6 +1,6 @@
 # Persistent Agent Workspace — Private G0 Snapshot
 
-This private repository was initialized from **OpenMausBot open-source current working tree**, pinned to the SHA in `UPSTREAM_LOCK.json`. It is a development-stage integration, not yet a rebranded distributable product.
+This private repository was initialized from **QBot open-source current working tree**, pinned to the SHA in `UPSTREAM_LOCK.json`. It is a development-stage integration, not yet a rebranded distributable product.
 
 ## First-release requirements
 

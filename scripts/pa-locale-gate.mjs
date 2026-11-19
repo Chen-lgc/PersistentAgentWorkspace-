@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Chinese-first release gate for the CORE flows; all locale keys are separately reported.
-// Run from the imported OpenMausBot root (uses no network, API key or translations).
+// Run from the imported QBot root (uses no network, API key or translations).
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 const ROOT = process.cwd();

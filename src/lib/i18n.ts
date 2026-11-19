@@ -95,7 +95,7 @@ export function activePackComplete(): boolean {
 
 /** Product-name redirection at presentation only; do not mutate locale keys or network URLs. */
 export function qbotDisplayName(value: string): string {
-  return value.replace(/\b(?:OpenMausBot|MausBot)\b/g, "QBot");
+  return value.replace(/\b(?:QBot|MausBot)\b/g, "QBot");
 }
 
 /** `{app}` is the product's name as a person reads it (productName) unless `params` names it. */
