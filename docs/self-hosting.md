@@ -125,7 +125,7 @@ server, installs MausBot under `/opt/openmausbot` and ends with HTTPS on your
 domain:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
+curl -fsSL https://raw.githubusercontent.com/milind-soni/QBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com
 cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair   # Link https://<DOMAIN>/pair#code=…
 ```
 
@@ -621,7 +621,7 @@ use the apps on this computer's screen, and run the MCP servers you keep for
 it, while the app is open. Folders and the terminal are added in **Settings →
 Servers**, where each server of yours has a **Share this computer** switch and
 **Choose what it can use**; the switch turns it off at once, and the menu bar's
-OpenMausBot item pauses it with your Clouds. The server needs nothing turned on:
+QBot item pauses it with your Clouds. The server needs nothing turned on:
 it takes a computer from its owner's pairings only, and a phone code or another
 person's pairing is never asked. Set `features.sharedComputers` to `false` in the
 server's config to turn this off, or to `true` to let every paired session lend
@@ -663,7 +663,7 @@ To move by hand instead, export a backup from this computer in **Settings →
 Backups → Export backup**, then import it on the server in **Settings → Backups
 → Import backup**. API keys, engine sign-ins and paired devices stay where they
 are on both sides; routines arrive paused. An older desktop app's **Copy this
-computer here** is answered with "Update OpenMausBot to bring your bots here by
+computer here** is answered with "Update QBot to bring your bots here by
 itself."
 
 Only conversations you start yourself on that server can use what you share;
@@ -845,7 +845,7 @@ is bootstrapped; while it does, Settings refuses to change that list and says
 which variable to change instead. One that is empty, as `.env.example` and the
 Compose files leave them, leaves the list to Settings.
 
-The code itself comes from `accounts.openmausbot.com`, the OpenMausBot
+The code itself comes from `accounts.openmausbot.com`, the QBot
 account service, so your server needs no email credentials. Your server asks
 it to send the code, checks the answer, and then issues its own session
 cookie: the browser only ever talks to your server, and who is welcome is
@@ -859,7 +859,7 @@ an SMTP address:
 
 ```sh
 OMB_SIGNIN_SMTP_URL="smtps://signin%40yourcompany.com:PASSWORD@smtp.yourcompany.com:465"
-OMB_SIGNIN_SMTP_FROM="OpenMausBot <signin@yourcompany.com>"   # else the user name, if it is an address
+OMB_SIGNIN_SMTP_FROM="QBot <signin@yourcompany.com>"   # else the user name, if it is an address
 ```
 
 `smtps://` uses TLS from the start (port 465); `smtp://` upgrades with
@@ -889,7 +889,7 @@ hosted workspace refuses them.
 
 ### Who may answer a card
 
-Approval cards are the provider's own (see the approval modes); OpenMausBot
+Approval cards are the provider's own (see the approval modes); QBot
 adds none. On a workspace several people share — portal membership, or an
 email sign-in list that names users — it narrows only whose answer counts,
 and only when the card can be traced to a person:
@@ -1033,7 +1033,7 @@ is the reference implementation.
 
 In a paired admin browser, as in the desktop app, **Take control** turns the
 Computer panel's picture into the live desktop for Local VMs and your own VPS,
-through the same address as OpenMausBot; **Full screen** fills the window with
+through the same address as QBot; **Full screen** fills the window with
 the same session. Shared, per-bot and pool Local VMs connect through their
 managed container's loopback port. VPS desktops connect
 through an SSH tunnel opened by the server. Neither needs an additional public
@@ -1493,7 +1493,7 @@ settings do not change it.
 
 Self-hosted servers follow the **stable** channel: a released version that our
 own Clouds have run for 48 hours, named by the image tag `stable` and by
-[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json).
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/QBot/channels/stable.json).
 `latest` follows `main` and is not for a server you rely on. The update check
 (`GET /api/updates/check`, **Check for updates** in the app) compares the
 server with the stable version; `OMB_UPDATE_CHANNEL=newest` makes it follow

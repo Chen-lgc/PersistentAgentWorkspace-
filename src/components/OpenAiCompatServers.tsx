@@ -236,14 +236,6 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
         </div>
       ))}
       <div className="mt-2 flex flex-col gap-1.5">
-        <button
-          type="button"
-          onClick={() => { setName(GEMINI_PRESET.name); setUrl(GEMINI_PRESET.url); setConnection(null); }}
-          disabled={busy !== null}
-          className="ui-button self-start"
-        >
-          {t("apiInstances.geminiPreset")}
-        </button>
         {url.trim() === GEMINI_PRESET.url && <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.geminiKeyHint")}</p>}
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />

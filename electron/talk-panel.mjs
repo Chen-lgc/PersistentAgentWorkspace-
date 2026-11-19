@@ -7,7 +7,7 @@ const MASCOT_PX = 28;
 const TEXT_LINES = 10;
 const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d";
 
-const qbotLabel = value => value.replace(/\b(?:OpenMausBot|MausBot)\b/g, "QBot");
+const qbotLabel = value => value.replace(/\b(?:QBot|MausBot)\b/g, "QBot");
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",

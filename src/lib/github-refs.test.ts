@@ -29,8 +29,8 @@ describe("parseGithubUrl", () => {
 
 describe("owner/repo#N in text", () => {
   it("finds a reference in running text", () => {
-    const spans = splitShortRefs("fixed in milind-soni/OpenMausBot#2547, see there.");
-    expect(spans.map((span) => span.text)).toEqual(["fixed in ", "milind-soni/OpenMausBot#2547", ", see there."]);
+    const spans = splitShortRefs("fixed in milind-soni/QBot#2547, see there.");
+    expect(spans.map((span) => span.text)).toEqual(["fixed in ", "milind-soni/QBot#2547", ", see there."]);
     expect(spans[1]!.ref).toMatchObject({ kind: "ref", url: "https://github.com/milind-soni/OpenMausBot/issues/2547" });
   });
 

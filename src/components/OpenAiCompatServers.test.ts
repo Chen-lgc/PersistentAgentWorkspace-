@@ -106,16 +106,28 @@ describe("adding another OpenAI-compatible server", () => {
     expect(JSON.stringify(fixture.track.mock.calls)).not.toMatch(/ada|example|ZZtest|SECRET/);
   });
 
-  it("fills in Google Gemini, so only the AI Studio key is left to paste", async () => {
+  it("hides the Gemini prefill button without removing the custom-server form", () => {
+    fixture.values = [];
+    const html = render([]);
+    expect(html).not.toContain("Fill in Google Gemini");
+    expect(html).toContain('aria-label="Display name"');
+    expect(html).toContain('aria-label="Base URL"');
+    expect(html).toContain('aria-label="API key"');
+  });
+
+  it("still accepts manually configured Gemini-compatible servers", async () => {
     fixture.values = [];
     fixture.api.mockReset();
     fixture.api.mockResolvedValueOnce({ instances: [] });
-    const button = (text: string) => form().find((node) => node.type === "button" && JSON.stringify(node.props.children ?? "").includes(text))!;
-    expect(JSON.stringify(form().map((node) => node.props.children ?? ""))).not.toContain("aistudio.google.com");
-    button("Fill in Google Gemini").props.onClick!();
+    for (const [label, value] of [
+      ["Display name", "Google Gemini"],
+      ["Base URL", "https://generativelanguage.googleapis.com/v1beta/openai"],
+      ["API key", "gemini-fixture"],
+    ] as const) {
+      form().find((node) => node.props["aria-label"] === label)!.props.onChange!({ target: { value } });
+    }
     expect(JSON.stringify(form().map((node) => node.props.children ?? ""))).toContain("aistudio.google.com/apikey");
-    form().find((node) => node.props["aria-label"] === "API key")!.props.onChange!({ target: { value: "gemini-fixture" } });
-    button("Add server").props.onClick!();
+    form().find((node) => node.type === "button" && JSON.stringify(node.props.children ?? "").includes("Add server"))!.props.onClick!();
     await flush();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/instances/openai-compat", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fixture.api.mock.calls[0][1].body)).toEqual({ displayName: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" });
