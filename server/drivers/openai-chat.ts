@@ -40,56 +40,12 @@ import type { RuntimeOptions } from "./openai-chat-options.ts";
 import { announcesAction } from "./chat-announcement.ts";
 import { apiKeyFormatError, providerTransportError } from "../provider-key-check.ts";
 import { fingerprint, MAX_DELIVERED_THREADS, replayDelivered, type DeliveredUserMessage } from "./openai-chat-replay.ts";
+import { completionUsage, usageFrom, type Completion, type CompletionJson, type OpenAIChatMessage, type Usage } from "./openai-chat-wire.ts";
 import { basename } from "node:path";
 
-export interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
-  content: string | ChatContentPart[] | null;
-  tool_calls?: ChatToolCall[];
-  tool_call_id?: string;
-  reasoning_content?: string;
-  reasoning?: string;
-  reasoning_details?: Record<string, unknown>[];
-}
-
-interface Usage {
-  input: number;
-  output: number;
-}
-
-export interface Completion {
-  text: string;
-  reasoning: string;
-  usage: Usage | null;
-  toolCalls: ChatToolCall[];
-  finishReason: string | null;
-  protocolReasoning: string;
-  protocolReasoningDetails: Record<string, unknown>[];
-  /** Every output item of a Responses API reply, encrypted reasoning included, for the next round of this turn only. */
-  responseOutput?: ResponseItem[];
-}
-
-interface CompletionJson extends ProviderBody {
-  model?: string;
-  choices?: Array<{
-    index?: number;
-    message?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown; tool_calls?: unknown; function_call?: unknown };
-    delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown; reasoning_details?: unknown; tool_calls?: unknown; function_call?: unknown };
-    finish_reason?: string | null;
-  }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
-  /** Groq reports streaming usage in its final x_groq envelope. */
-  x_groq?: { usage?: CompletionJson["usage"] };
-}
+export type { Completion, OpenAIChatMessage } from "./openai-chat-wire.ts";
 
 const LIVENESS_MISSES = 3;
-
-const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
-  usage
-    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
-    : null;
-
-const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
@@ -793,10 +749,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             let started = false;
             let fatal: Error | undefined, title = call.function.name, skipRepeatCount = false;
             try {
-              let args: unknown;
-              try { args = JSON.parse(call.function.arguments); }
+              let parsedArgs: unknown;
+              try { parsedArgs = JSON.parse(call.function.arguments); }
               catch { throw new ChatProtocolError("tool arguments are not complete JSON"); }
-              if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
+              const args = object(parsedArgs);
+              if (!args) throw new ChatProtocolError("tool arguments must be a JSON object");
               if (scrubProviderKey.containsCredential(args)) throw new ChatProtocolError("Tool arguments contained the model provider's API key. The tool was not run.");
               const inputPreview = preview(args);
               if (call.function.name === PDF_TOOL) {
