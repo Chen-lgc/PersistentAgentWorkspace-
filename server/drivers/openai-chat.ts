@@ -17,7 +17,7 @@ import { chatToolLimitFor, chatToolLimitKey } from "../tool-count-limit.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, imageTransportAllowed, type ChatContentPart } from "./chat-images.ts";
 import { chatPdfParts } from "./chat-pdfs.ts";
 import { pdfDelegationNote, pdfNeedsResponses, rejectsPdfInput, UnsupportedPdfInputError } from "./pdf-capabilities.ts";
-import { withoutTurnPdfTags } from "../turn-images.ts";
+import { TURN_PDF_MAX_BYTES, withTurnPdfReferences } from "../turn-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
@@ -40,6 +40,7 @@ import type { RuntimeOptions } from "./openai-chat-options.ts";
 import { announcesAction } from "./chat-announcement.ts";
 import { apiKeyFormatError, providerTransportError } from "../provider-key-check.ts";
 import { fingerprint, MAX_DELIVERED_THREADS, replayDelivered, type DeliveredUserMessage } from "./openai-chat-replay.ts";
+import { basename } from "node:path";
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -107,6 +108,18 @@ const LOCAL_CORRECTIVE_ROUNDS = 2;
 
 const TEXT_ONLY_ATTACHMENT_NOTE = "[The person attached image(s), but this model cannot see images. Say so if the request depends on them.]";
 const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see images. Read the page with a snapshot or a text tool instead.]";
+const PDF_TOOL = "read_conversation_pdf";
+const PDF_TOOL_DEFINITION: ChatToolDefinition = {
+  type: "function",
+  function: {
+    name: PDF_TOOL,
+    description: "List saved PDFs in this conversation or read one only when the user's task needs its contents. A read sends that selected PDF to this model in the next round. Use the exact readName shown in an attachment reference or returned by list. PDFs are not read automatically.",
+    parameters: { type: "object", additionalProperties: false, properties: {
+      action: { type: "string", enum: ["list", "read"] },
+      readName: { type: "string" },
+    }, required: ["action"] },
+  },
+};
 
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -418,7 +431,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
   const seesImages = (turn: SendTurnInput) =>
     options.imageInput?.(turn.model || options.models().default) ?? true;
-  const messagesFor = (turn: SendTurnInput, pdfParts: ReturnType<typeof chatPdfParts>): OpenAIChatMessage[] => {
+  const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => {
     const halves = promptHalves(turn);
     const transcript = turn.transcript ?? [];
     const replay = replayDelivered(transcript, delivered.get(turn.threadId) ?? []);
@@ -427,13 +440,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : volatileContextNote(volatile, Boolean(replay.volatile));
     const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !turn.images?.length ? text
       : `${text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}`;
-    const sentText = withoutTurnPdfTags(turn.text, turn.pdfs ?? []);
+    const sentText = withTurnPdfReferences(turn.text, turn.pdfs ?? []);
     const userTurn = { ...turn, text: textOnly(withContextNote(note, sentText)), images: options.computerUse && seesImages(turn) ? turn.images : undefined };
-    const content = chatUserContent(userTurn, pdfParts);
+    const content = chatUserContent(userTurn);
     const kept = turn.recalled ? turn.text.replace(`${turn.recalled}\n\n`, "") : turn.text;
     const record = {
       text: kept,
-      sent: textOnly(withContextNote(note, withoutTurnPdfTags(kept, turn.pdfs ?? []))),
+      sent: textOnly(withContextNote(note, withTurnPdfReferences(kept, turn.pdfs ?? []))),
       ...(note ? { volatile } : {}),
       after: transcript.length ? fingerprint(transcript.at(-1)!.text) : "",
     };
@@ -445,7 +458,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       ...(system ? [{ role: "system" as const, content: system }] : []),
       ...transcript.map((message, index) => ({
         role: message.role,
-        content: withoutTurnPdfTags(replay.content.get(index) ?? message.text, turn.pdfs ?? []),
+        content: withTurnPdfReferences(replay.content.get(index) ?? message.text, turn.pdfs ?? []),
       })),
       { role: "user", content },
     ];
@@ -460,13 +473,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
     if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl, options);
     const model = turn.model || options.models().default;
-    const extractPdfs = Boolean(options.pdfText && turn.pdfs?.length);
-    let pdfAttached = Boolean(!extractPdfs && options.pdfInput && turn.pdfs?.length && options.pdfSupport?.(model) !== false);
-    const pdfParts = pdfAttached ? chatPdfParts(turn.pdfs ?? [], options.pdfAttachmentDir) : [];
+    let pdfAttached = false;
+    let pdfAccepted = false;
+    let pdfRefused = false;
+    const readPdfs = new Set<string>();
+    const requestedPdfs: NonNullable<SendTurnInput["pdfs"]> = [];
+    let requestedPdfBytes = 0;
 
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn, pdfParts);
+    const messages = messagesFor(turn);
     const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
@@ -478,7 +494,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     };
     const usePdfDelegationContext = () => {
       removePdfParts();
-      const note = pdfDelegationNote(turn.pdfs ?? []);
+      const note = pdfDelegationNote(requestedPdfs);
       const system = messages.find((message) => message.role === "system" && typeof message.content === "string");
       if (system) system.content += `\n\n${note}`;
       else messages.unshift({ role: "system", content: note });
@@ -558,18 +574,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
-        if (turn.pdfs?.length && !pdfAttached && !extractPdfs) usePdfDelegationContext();
-        if (extractPdfs) {
-          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: "正在准备会话 PDF 的文件解析内容；已解析过的文件将复用本地缓存。" });
-          const content = await options.pdfText!(turn.pdfs!, abort.signal);
-          abort.signal.throwIfAborted();
-          messages.splice(messages[0]?.role === "system" ? 1 : 0, 0, { role: "system", content });
-          emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `已为 ${model} 准备 ${turn.pdfs!.length} 份会话 PDF 的解析文字及历史对话；PDF 原图未直接传入模型。` });
-        }
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
         const toolsOff = options.tools === false || options.toolUse?.(model) === false;
+        const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
+        const pdfToolAllowed = !toolsOff && Boolean(turn.pdfs?.length) && allowsTool(scope, { kind: "native", name: PDF_TOOL });
         const remoteHttp = options.computerUse && !imageTransportAllowed(options.apiUrl, options);
         const toolIntegrations = remoteHttp
           ? { ...turn.integrations, localComputer: undefined, browser: undefined }
@@ -577,15 +587,23 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (!toolsOff && remoteHttp && (turn.integrations?.localComputer || turn.integrations?.browser)) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: "Computer and browser tools are unavailable for remote HTTP model endpoints. Use HTTPS to enable them." });
         }
+        const toolLimit = chatToolLimitFor(options.apiUrl, model);
         tools = await mountChatTools(toolsOff ? undefined : toolIntegrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
-          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText, chatToolLimitFor(options.apiUrl, model));
+          toolSchemaProfileFor({ url: options.apiUrl, model }), turn.cwd ?? turn.toolResultFolder, safeText,
+          toolLimit === null ? null : toolLimit - Number(questionAllowed && pdfToolAllowed));
+        if (questionAllowed && pdfToolAllowed) tools.budget.limit = toolLimit;
         noteToolBudget(turn.botId, tools.budget);
         for (const message of chatToolNotices(tools)) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
-        const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
         let optionalQuestionOnly = questionAllowed && tools.definitions.length === 0;
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
           tools.definitions.push(ASK_USER_TOOL_DEFINITION);
+        }
+        if (pdfToolAllowed) {
+          const existing = tools.definitions.findIndex((definition) => definition.function.name === PDF_TOOL);
+          if (existing < 0) tools.definitions.push(PDF_TOOL_DEFINITION);
+          else tools.definitions.splice(existing, 1, PDF_TOOL_DEFINITION);
+          optionalQuestionOnly = false;
         }
         for (let round = 0; round < MAX_CHAT_ROUNDS; round++) {
           abort.signal.throwIfAborted();
@@ -615,9 +633,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 const shown = holdback && streamKind === "assistant_text" ? holdback.feed(text) : text;
                 if (shown) delta(shown, streamKind);
               }, tools.definitions, undefined, turn.variant);
-              if (pdfAttached && round === 0) {
+              if (pdfAttached && !pdfAccepted) {
+                pdfAccepted = true;
                 options.recordPdfSupport?.(model, true);
-                emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `本轮已向 ${model} 附带 ${turn.pdfs!.length} 份会话 PDF 原件及历史对话。` });
+                emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `已向 ${model} 提供本轮请求读取的 PDF 原件。` });
               }
               // A reply cut off at the token limit may be a call cut short; running half of one is worse than saying so.
               const written = holdback && !completion.toolCalls.length && completion.finishReason !== "length" ? textToolCalls(completion.text, tools.definitions) : null;
@@ -636,15 +655,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               break;
             } catch (value) {
               const error = asError(value);
-              if (error instanceof UnsupportedPdfInputError && pdfAttached && round === 0 && !streamed && !seenCalls.size && !abort.signal.aborted) {
+              if (error instanceof UnsupportedPdfInputError && pdfAttached && !streamed && !abort.signal.aborted) {
                 options.recordPdfSupport?.(model, false);
                 pdfAttached = false;
+                pdfAccepted = false;
+                pdfRefused = true;
+                readPdfs.clear();
                 usePdfDelegationContext();
                 continue;
               }
               const verdict = classifyError(error);
               // A provider refuses a request with too many tools before running anything: learn its limit and list fewer.
-              const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model), [ASK_USER_TOOL_DEFINITION]);
+              const refit = streamed || seenCalls.size || abort.signal.aborted ? undefined : await refitChatTools(tools, error, chatToolLimitKey(options.apiUrl, model),
+                pdfToolAllowed ? [ASK_USER_TOOL_DEFINITION, PDF_TOOL_DEFINITION] : [ASK_USER_TOOL_DEFINITION]);
               if (refit) {
                 for (const message of refit) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
                 noteToolBudget(turn.botId, tools.budget);
@@ -762,6 +785,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           // failed step still shows as failed; a failure in the last calls before the answer, or a person's no, still ends it.
           if (!denials.length) { toolFailed = false; failedCalls.length = 0; }
           const screenshotParts: ChatContentPart[] = [];
+          const selectedPdfParts: ChatContentPart[] = [];
+          const selectedPdfTexts: string[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();
             let result: ChatToolResult;
@@ -774,7 +799,34 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (!object(args)) throw new ChatProtocolError("tool arguments must be a JSON object");
               if (scrubProviderKey.containsCredential(args)) throw new ChatProtocolError("Tool arguments contained the model provider's API key. The tool was not run.");
               const inputPreview = preview(args);
-              if (call.function.name === ASK_USER_TOOL) {
+              if (call.function.name === PDF_TOOL) {
+                if (!pdfToolAllowed) throw new Error("Tool selection excludes this tool");
+                emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
+                  title: PDF_TOOL, ...(inputPreview ? { input: inputPreview } : {}),
+                });
+                started = true;
+                if (args.action === "list") {
+                  result = { ok: true, text: JSON.stringify(turn.pdfs!.map(pdf => ({ name: pdf.name, readName: `upload:${basename(pdf.path)}`, bytes: pdf.bytes }))) };
+                } else if (args.action === "read" && typeof args.readName === "string") {
+                  const pdf = turn.pdfs!.find(item => `upload:${basename(item.path)}` === args.readName);
+                  if (!pdf) throw new Error("Choose an exact readName returned by list for a PDF in this conversation.");
+                  if (readPdfs.has(args.readName)) result = { ok: true, text: "This PDF is already available in this turn." };
+                  else if (!options.pdfText && (pdfRefused || !options.pdfInput || options.pdfSupport?.(model) === false)) result = { ok: true, text: pdfDelegationNote([pdf]) };
+                  else {
+                    if (requestedPdfBytes + pdf.bytes > TURN_PDF_MAX_BYTES) throw new Error(`Selected PDFs exceed the ${TURN_PDF_MAX_BYTES / 1024 / 1024} MB turn limit.`);
+                    if (options.pdfText) {
+                      selectedPdfTexts.push(await options.pdfText([pdf], abort.signal));
+                    } else {
+                      selectedPdfParts.push(...chatPdfParts([pdf], options.pdfAttachmentDir));
+                      pdfAttached = true;
+                    }
+                    requestedPdfs.push(pdf);
+                    requestedPdfBytes += pdf.bytes;
+                    readPdfs.add(args.readName);
+                    result = { ok: true, text: `Selected ${pdf.name} for reading in the next model round.` };
+                  }
+                } else throw new Error("Choose action list, or action read with an exact readName.");
+              } else if (call.function.name === ASK_USER_TOOL) {
                 if (!questionAllowed || !allowsTool(scope, { kind: "native", name: ASK_USER_TOOL })) throw new Error("Tool selection excludes this tool");
                 // A question goes before the gate: Full would auto-run an unanswered ask, Ask would show Allow/Deny.
                 const questions = parseAskQuestions(args);
@@ -848,7 +900,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             if (fatal) throw fatal;
             if (repeats?.stopped) { stopReason = "incomplete_action"; throw new ChatProtocolError(repeats.stopped); }
           }
-          if (screenshotParts.length) messages.push({ role: "user", content: screenshotParts });
+          if (selectedPdfTexts.length) messages.push({ role: "user", content: selectedPdfTexts.join("\n\n") });
+          if (selectedPdfParts.length || screenshotParts.length) messages.push({ role: "user", content: [...selectedPdfParts, ...screenshotParts] });
         }
         if (!ok) throw new ChatProtocolError(stoppedAfter(`${MAX_CHAT_ROUNDS} steps`));
       } catch (value) {

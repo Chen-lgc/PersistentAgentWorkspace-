@@ -12,15 +12,19 @@ reference a shared PDF by its unique filename or upload reference in its own
 conversation; the shared scope is checked again on every turn. Existing messages are migrated from their
 owned upload tags on the next API turn.
 
-The existing API adapter sends saved PDF bytes and the selected history to the
-selected model on every turn that can accept them. Kimi's official API uses the
-file extraction route described below. Qianfan OCR is not used, and no other
+The API adapter keeps saved PDF references available without sending PDF bytes
+or extracted text at the start of a turn. The model can call
+`read_conversation_pdf` to list references and select one PDF by its exact
+`upload:` readName when the current task needs it. Only a selected PDF is
+supplied in the following model round. A later user turn starts without the
+file again. Kimi's official API uses the file extraction route described below,
+also only after the model selects a PDF. Qianfan OCR is not used, and no other
 chat model is selected to parse documents. PDF capability is independent of image input.
 Explicit `/models` PDF metadata is used when present; otherwise the adapter
 tries the actual PDF. A file schema refusal can try the same model through
 Responses. An explicit PDF rejection removes file parts and supplies attachment
 identifiers and task-delegation instructions to the same model, with a notice,
-before any answer or tool execution. The model is told to assign the actual
+before any answer after the read request. The model is told to assign the actual
 user task and original reference to the responsible specialist, and that
 summaries are not the original document. Credentials, size limits, corrupt
 files, timeouts and unrelated provider errors remain errors.
@@ -39,13 +43,14 @@ capability to be checked again. A successful response establishes transport
 acceptance, not the quality of the provider's document interpretation. Unknown
 error formats remain visible rather than silently discarding the PDF.
 
-The native request limit remains `TURN_PDF_MAX_BYTES` (currently 50 MiB total).
+The native request limit remains `TURN_PDF_MAX_BYTES` (currently 50 MiB total
+for PDFs selected in one turn).
 The provider may impose lower limits. Known unsupported models receive only
 attachment identifiers and delegation guidance, without reading the file bytes
 or applying the native send limit. The receiving bot validates and sends the
 original through its own supported PDF route. Missing or changed originals produce
-an explicit error for models receiving PDFs. Each compatible follow-up resends
-the original files, so the provider can charge for them again.
+an explicit error when the model selects them. Follow-ups send no PDF unless the
+model chooses to read it again; that read can incur another provider charge.
 
 ## Kimi official file extraction
 
@@ -54,8 +59,8 @@ the OpenAI-compatible adapter uses Kimi's [documented file Q&A flow](https://pla
 multipart `POST /files` with `purpose=file-extract`, then
 `GET /files/{id}/content`. Pending extraction statuses are polled through
 `GET /files/{id}`. Both the newer `extract_status` and older `status` responses
-are accepted. Extracted text is sent as labeled reference data alongside the
-history to the user's selected model through the existing chat adapter.
+are accepted. After the model calls `read_conversation_pdf`, extracted text is
+sent as labeled reference data through the existing chat adapter.
 No `file` part or file ID is inserted into the chat messages. A previous native
 PDF rejection does not disable this route. Model names alone do not activate
 it on a third-party relay.
@@ -71,8 +76,9 @@ model's own context limit may be lower.
 Successful extraction is cached under `kimi-pdf-text/` in the workspace data
 directory, keyed by endpoint, credential hash, and PDF content hash. Cached
 text files use mode 0600 and contain no raw credentials. Original attachments
-must still pass the normal private-store validation before cache use. Follow-up
-turns, switching between Kimi models, and application restarts reuse this text.
+must still pass the normal private-store validation before cache use. A later
+explicit read, switching between Kimi models, and application restarts reuse
+this text.
 Only references belonging to the active conversation branch are loaded, and
 other providers do not receive this cache. Extraction text is not appended to
 the saved conversation history. After extraction (including failure), QBot
@@ -88,18 +94,24 @@ other external fetches. Exercise these steps via `control-omb`, retaining its
 
 1. Add an official Kimi endpoint with synthetic credentials and two models;
    upload a PDF through `/api/files` and ask the first model about it.
-2. Assert the multipart upload contains the original bytes, extraction runs,
-   the outgoing chat has extracted text without a `file` part, and a reply is
-   saved under the selected model.
-3. Ask a follow-up without attaching again; assert no second upload.
-4. Switch to a relay model that rejects PDF parts; assert the request contains
-   delegation instructions and original upload references, without any locally
-   extracted PDF text or Kimi extraction cache.
-5. Switch back to a different Kimi model, then restart the isolated server in
-   the same temporary workspace; both turns must reuse the cached extraction.
-6. Switch to a native-PDF relay model; assert original PDF parts are still sent.
-   Start a separate conversation and confirm no PDF contents are inherited.
-7. Stop the exact fixture children and remove their temporary workspace. These
+2. Assert the first chat request contains only the PDF reference and
+   `read_conversation_pdf`, with no upload or extraction request. Have the model
+   call the tool using the exact readName.
+3. Assert the multipart upload contains the selected original bytes, extraction
+   runs, the next chat request has extracted text without a `file` part, and a
+   reply is saved under the selected model.
+4. Ask a follow-up without requesting the PDF; assert no extraction or PDF text
+   appears in that turn. Have the model request it on a subsequent turn and
+   assert the cached extraction is reused without a second upload.
+5. Switch to a relay model that selects the PDF but rejects its native part;
+   assert delegation instructions and the original upload reference appear
+   after the rejection, without Kimi extraction text.
+6. Switch back to a different Kimi model, then restart the isolated server in
+   the same temporary workspace; selected reads must reuse cached extraction.
+7. Switch to a native-PDF relay model; assert original PDF parts are sent only
+   after its read call. Start a separate conversation and confirm no PDF
+   contents are inherited.
+8. Stop the exact fixture children and remove their temporary workspace. These
    checks prove routing and persistence, not live Kimi parsing quality or billing.
 
 ## Task delegation after native PDF refusal

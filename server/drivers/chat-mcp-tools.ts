@@ -325,7 +325,8 @@ export async function refitChatTools(session: ChatToolSession, error: unknown, k
   learnToolCountLimit(key, limit);
   console.warn(`chat-mcp: the model takes at most ${limit} tools; listing the turn's tools again within that`);
   const kept = session.definitions.filter((definition) => runtime.includes(definition));
-  await session.refit(limit);
+  await session.refit(limit - Math.max(0, kept.length - RUNTIME_TOOLS));
+  session.budget.limit = limit;
   session.definitions.push(...kept);
   return toolLimitNotices(session);
 }

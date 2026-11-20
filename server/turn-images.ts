@@ -102,18 +102,18 @@ export function extractRoomTurnPdfs(driverKind: string, burstTexts: readonly str
   return [...burstTexts, ...(latestText ? [latestText] : [])].flatMap((text) => extractTurnPdfs(text));
 }
 
-export function withoutTurnPdfTags(text: string, pdfs: readonly TurnPdfInput[]): string {
+export function withTurnPdfReferences(text: string, pdfs: readonly TurnPdfInput[]): string {
   if (!pdfs.length || !text.includes("<attached-file")) return text;
-  const names = new Set(pdfs.map((pdf) => basename(pdf.path)));
-  // Admission still requires an owned, standalone tag. Removal also covers JSON-labelled room text and box paths;
-  // it cannot grant file access, and only removes references already admitted for this conversation.
+  const byName = new Map(pdfs.map((pdf) => [basename(pdf.path), pdf]));
   return text.replace(/<attached-file\b[^>\r\n]*\/>/g, (tag) => {
     let decoded = tag;
     if (tag.includes('\\"')) {
       try { decoded = JSON.parse(`"${tag}"`) as string; } catch { return tag; }
     }
     const match = ATTACHMENT_TAG.exec(decoded);
-    return match && names.has(basename(decodeAttachmentAttribute(match[2]!))) ? "" : tag;
+    const name = match && basename(decodeAttachmentAttribute(match[2]!));
+    const pdf = name && byName.get(name);
+    return pdf ? `[Attached PDF: ${JSON.stringify(pdf.name)}; readName: upload:${name}]` : tag;
   });
 }
 

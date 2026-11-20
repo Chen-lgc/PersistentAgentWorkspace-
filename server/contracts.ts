@@ -148,7 +148,7 @@ export interface SendTurnInput {
   confinedWhy?: string;
   /** Images for this user turn only; kept out of replay transcripts. */
   images?: TurnImageInput[];
-  /** Deduplicated PDF references from the current conversation, including earlier turns. */
+  /** PDFs available for this turn's model to select through its PDF reading tool. */
   pdfs?: TurnPdfInput[];
   model?: string;
   effort?: EffortLevel;

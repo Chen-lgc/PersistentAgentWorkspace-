@@ -30,13 +30,15 @@ file limits and revision checks apply. Uploaded originals remain read-only.
 Old files and uploads remain tied to their original conversations' lifetime.
 
 Sharing files does not share conversation transcripts or change `session_search`.
-A shared PDF is supplied to an OpenAI-compatible model only when the current
+A shared PDF is available to an OpenAI-compatible model only when the current
 conversation's active branch contains a user message or a server-recorded
 assignment from a current shared member naming its unique filename or exact
 upload reference. Ordinary bot replies and returned results do not select PDFs.
 Delegated briefs should include that reference. The assignment's own request
 message bounds selection even when the recipient has older user messages. Ambiguous
-filenames require the upload reference. Follow-ups retain these references;
+filenames require the upload reference. The model calls `read_conversation_pdf`
+to read a selected PDF; the original or provider-extracted text is sent only
+after that call. Follow-ups retain references but do not resend PDF contents;
 Start fresh excludes earlier ones. Every request rechecks the shared scope,
 and existing PDF limits and Kimi extraction remain in force. Explicit native
 PDF refusals provide only attachment identifiers and task-delegation guidance:
